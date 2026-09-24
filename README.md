@@ -82,7 +82,27 @@ npm run preview
 项目已内置 `base: './'` 相对路径 + hash 路由，因此无论部署到
 `https://<用户名>.github.io/<仓库名>/` 还是自定义域名，都无需额外配置。
 
-### 方式一：脚本一键部署（推荐）
+线上地址：<https://zhouyj-hub.github.io/collect-rent/>
+
+### 方式零：GitHub Actions 自动部署（推荐 ✅）
+
+仓库已内置工作流 `.github/workflows/deploy.yml`，**只要把代码推送到 `main`
+分支，就会自动构建并发布到 GitHub Pages**，无需任何手动操作。
+
+```bash
+git add .
+git commit -m "xxx"
+git push
+# 推送后到仓库 Actions 页查看进度，完成后自动上线
+```
+
+- 也可在 **Actions → Deploy to GitHub Pages → Run workflow** 手动触发；
+- 首次运行会自动把仓库 Pages 来源设为 GitHub Actions（`configure-pages`
+  的 `enablement: true`），无需进设置页手动切换；
+- 如果部署未生效，请到 **Settings → Pages** 确认来源为
+  **GitHub Actions**（Build and deployment → Source）。
+
+### 方式一：脚本一键部署
 
 1. 将代码推送到 GitHub 仓库；
 2. 本地执行：
