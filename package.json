@@ -1,0 +1,29 @@
+{
+  "name": "zyj-collect-rent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "收房租 H5 —— 记录每月房租、水费、电费、燃气费和垃圾清理费",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "type-check": "vue-tsc --noEmit",
+    "deploy": "npm run build && gh-pages -d dist -t true"
+  },
+  "dependencies": {
+    "@vant/touch-emulator": "^1.4.0",
+    "pinia": "^2.3.1",
+    "vant": "^4.9.19",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@vitejs/plugin-vue": "^5.2.3",
+    "gh-pages": "^6.3.0",
+    "typescript": "~5.8.3",
+    "vite": "^6.3.5",
+    "vue-tsc": "^2.2.10"
+  }
+}

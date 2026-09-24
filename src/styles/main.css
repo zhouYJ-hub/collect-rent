@@ -1,0 +1,66 @@
+:root {
+  --app-primary: #0ba360;
+  --app-primary-end: #3cba92;
+  --app-gradient: linear-gradient(135deg, #0ba360 0%, #3cba92 100%);
+  --page-bg: #f4f6f8;
+  --card-radius: 14px;
+  --text-main: #323233;
+  --text-sub: #969799;
+
+  /* Vant 主题色对齐 */
+  --van-primary-color: #0ba360;
+  --van-success-color: #0ba360;
+  --van-cell-group-inset-radius: 14px;
+  --van-button-primary-background: var(--app-gradient);
+  --van-button-primary-border-color: transparent;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  background: #e9edf2;
+  color: var(--text-main);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.page {
+  position: relative;
+  max-width: 640px;
+  margin: 0 auto;
+  min-height: 100vh;
+  background: var(--page-bg);
+  box-shadow: 0 0 24px rgba(31, 45, 61, 0.08);
+  padding-bottom: calc(84px + env(safe-area-inset-bottom));
+}
+
+/* 页面切换动画 */
+.page-fade-enter-active,
+.page-fade-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+.page-fade-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.page-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
