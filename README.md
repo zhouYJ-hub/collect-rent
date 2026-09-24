@@ -10,6 +10,7 @@
 - 📊 年度统计：全年应收、各费用构成占比、12 个月明细条形图
 - 🗑️ 记录管理：滑动卡片删除、点击卡片编辑、重复记录保存提醒
 - 💾 数据持久化：Pinia + localStorage，数据保存在本机浏览器
+- ☁️ 云同步：数据同步到你自己的 GitHub 私有仓库（免费、多设备恢复、可自动上传）
 - 📱 H5 适配：Vant 组件库，手机端体验优先，桌面端自动居中显示
 
 ## 技术栈
@@ -38,6 +39,43 @@ npm run build
 # 本地预览构建产物
 npm run preview
 ```
+
+## ☁️ 云同步（免费云端存储）
+
+应用内置「GitHub 私有仓库」云同步：数据以 JSON 文件存在**你自己的私有仓库**里，
+免费、无需自建服务器，与 GitHub Pages 部署天然搭配。
+
+### 配置步骤
+
+1. 在 GitHub 新建一个**私有仓库**（如 `rent-data`），专门存数据；
+2. 创建 Fine-grained Personal Access Token：
+   [github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new)
+   - Repository access：只勾选该私有仓库
+   - Permissions → Repository permissions → **Contents：Read and write**
+3. 打开 App 底部「云同步」页，填写用户名 / 仓库名 / 分支（默认 `main`）/
+   文件路径（默认 `data/records.json`）/ Token，保存；
+4. 点击「**立即同步**」，之后也可开启「修改后自动同步」。
+
+### 同步规则
+
+- 同步 = 云端 ⇄ 本机**双向合并**：按记录 `id` 对齐，`updatedAt` 较新的一方胜出，双方独有的记录都保留；
+- 在新手机 / 新浏览器填入同一配置并同步，即可恢复全部数据；
+- Token 只保存在本机浏览器 localStorage，**不会打进网页代码**；建议只授权单个私有仓库，泄露影响可控；
+- GitHub API 免费额度为认证后 5000 次/小时，个人记账场景绰绰有余。
+
+### 其他免费云端方案对比
+
+| 方案 | 免费额度 | 优点 | 注意 |
+| --- | --- | --- | --- |
+| **GitHub 私有仓库（本项目内置）** | 完全免费 | 零额外服务、配置简单、数据自主可控 | 非实时；需自建 Token；本质是文件存储 |
+| Supabase | 500MB 数据库 + 认证 | 真正的数据库、SQL、多端实时 | 国内直连延迟较高 |
+| Firebase Firestore | 1GB 存储 + 5万读/天 | 实时同步强、SDK 成熟 | 国内访问受限 |
+| Cloudflare Workers + D1/KV | 10 万请求/天 | 边缘节点速度快 | 需自己写后端接口 |
+| LeanCloud | 有限免费额度 | 国内访问稳定 | 免费额度小、需实名认证 |
+
+> 当前项目的数据层集中在 `src/stores/rent.ts`（读取/合并/写入）与
+> `src/stores/sync.ts`（云端传输），想换成 Supabase 等方案时，
+> 只需替换 `sync.ts` 里的 `fetchRemote` / `pushRemote` 实现。
 
 ## 部署到 GitHub Pages
 
@@ -86,9 +124,10 @@ npm run preview
 
 ## 数据说明
 
-- 数据保存在浏览器 `localStorage`（键名 `zyj-collect-rent:records:v1`）；
-- 清除浏览器数据会删除记录，换设备/换浏览器数据不互通；
-- 后续如需多端同步，可在 `src/stores/rent.ts` 基础上接入后端接口。
+- 本地数据保存在浏览器 `localStorage`（键名 `zyj-collect-rent:records:v1`）；
+- 云同步配置与 Token 保存在 `zyj-collect-rent:sync:v1`；
+- 建议开启「云同步」，避免清除浏览器数据导致记录丢失；
+- 换设备 / 换浏览器时，在新环境配置同一 GitHub 仓库并点同步即可恢复。
 
 ## 目录结构
 
@@ -100,12 +139,14 @@ npm run preview
 │   ├── App.vue            # 布局：路由视图 + 底部 Tabbar
 │   ├── router/index.ts    # 路由（hash 模式）
 │   ├── stores/rent.ts     # Pinia 核心业务（CRUD + 汇总 + 持久化）
+│   ├── stores/sync.ts     # GitHub 私有仓库云同步（拉取/合并/上传）
 │   ├── types/index.ts     # RentRecord 类型 + 费用项配置
 │   ├── utils/             # 金额格式化、ID 生成
 │   ├── styles/main.css    # 全局样式与主题变量
 │   └── views/
 │       ├── HomeView.vue       # 月度记录列表（汇总 + 滑动管理）
 │       ├── RecordFormView.vue # 新增 / 编辑表单
-│       └── StatsView.vue      # 年度统计
+│       ├── StatsView.vue      # 年度统计
+│       └── SyncView.vue       # 云同步配置与操作
 └── vite.config.ts         # base './'，适配 GitHub Pages
 ```

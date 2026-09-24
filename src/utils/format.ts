@@ -6,3 +6,8 @@ export function formatYuan(value: number): string {
   })
   return `¥${text}`
 }
+
+/** 时间格式化（云同步状态用） */
+export function formatDateTime(timestamp: number): string {
+  return new Date(timestamp).toLocaleString('zh-CN', { hour12: false })
+}

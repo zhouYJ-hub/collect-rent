@@ -2,8 +2,13 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 
+import { useSyncStore } from '@/stores/sync'
+
 const route = useRoute()
 const showTabbar = computed(() => route.meta.showTabbar === true)
+
+// 初始化云同步 store，注册「记录变化 → 自动上传」监听
+useSyncStore()
 </script>
 
 <template>
@@ -23,6 +28,7 @@ const showTabbar = computed(() => route.meta.showTabbar === true)
     >
       <van-tabbar-item to="/" icon="notes-o">记录</van-tabbar-item>
       <van-tabbar-item to="/stats" icon="bar-chart-o">统计</van-tabbar-item>
+      <van-tabbar-item to="/sync" icon="cloud-o">云同步</van-tabbar-item>
     </van-tabbar>
   </div>
 </template>

@@ -32,8 +32,8 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
-/** 从 localStorage 读取时做一次结构校验，防止脏数据 */
-function isRentRecord(value: unknown): value is RentRecord {
+/** 从 localStorage / 云端读取时做一次结构校验，防止脏数据 */
+export function isRentRecord(value: unknown): value is RentRecord {
   if (typeof value !== 'object' || value === null) return false
   const r = value as Record<string, unknown>
   return (
@@ -135,6 +135,11 @@ export const useRentStore = defineStore('rent', () => {
     return record
   }
 
+  /** 云同步合并后整体替换本地数据 */
+  function replaceAll(list: RentRecord[]): void {
+    records.value = list
+  }
+
   function removeRecord(id: string): void {
     records.value = records.value.filter((r) => r.id !== id)
   }
@@ -194,6 +199,7 @@ export const useRentStore = defineStore('rent', () => {
     findDuplicate,
     saveRecord,
     removeRecord,
+    replaceAll,
     togglePaid,
     monthSummary,
     yearSummary,

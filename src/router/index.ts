@@ -27,6 +27,12 @@ const router = createRouter({
       meta: { title: '统计', showTabbar: true }
     },
     {
+      path: '/sync',
+      name: 'sync',
+      component: () => import('@/views/SyncView.vue'),
+      meta: { title: '云同步', showTabbar: true }
+    },
+    {
       path: '/edit/:id?',
       name: 'edit',
       component: () => import('@/views/RecordFormView.vue'),
