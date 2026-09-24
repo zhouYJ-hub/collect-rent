@@ -1,4 +1,5 @@
 # 推送到 main 分支时，自动构建并发布到 GitHub Pages
+# 注意：首次使用需在 Settings → Pages 把 Source 设为 GitHub Actions（一次性操作）
 name: Deploy to GitHub Pages
 
 on:
@@ -35,12 +36,6 @@ jobs:
 
       - name: Build
         run: npm run build
-
-      # 首次运行会自动把仓库的 Pages 来源设置为 GitHub Actions
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

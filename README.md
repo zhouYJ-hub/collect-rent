@@ -97,10 +97,11 @@ git push
 ```
 
 - 也可在 **Actions → Deploy to GitHub Pages → Run workflow** 手动触发；
-- 首次运行会自动把仓库 Pages 来源设为 GitHub Actions（`configure-pages`
-  的 `enablement: true`），无需进设置页手动切换；
-- 如果部署未生效，请到 **Settings → Pages** 确认来源为
-  **GitHub Actions**（Build and deployment → Source）。
+- **首次使用需手动开启一次**：到 **Settings → Pages**，在
+  Build and deployment → Source 选择 **GitHub Actions** 并保存；
+  之后每次推送全自动部署，无需再管；
+- 若 Actions 报 `Resource not accessible by integration`，说明还没做上面这步
+  （`GITHUB_TOKEN` 无权首次创建 Pages 站点，属正常限制）。
 
 ### 方式一：脚本一键部署
 
