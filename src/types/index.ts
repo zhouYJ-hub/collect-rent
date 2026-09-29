@@ -25,6 +25,8 @@ export interface MeterInfo {
   currentReading?: number
   /** 单价（元） */
   unitPrice?: number
+  /** 参考读数（楼下记录 = 楼上本月读数，用于总表扣减分表） */
+  refReading?: number
   /** 抄表照片（压缩后的 dataURL） */
   photo?: string
 }
@@ -51,13 +53,19 @@ export const METER_META: MeterMetaItem[] = [
   { key: 'gas', label: '燃气表', feeLabel: '燃气费', emoji: '🔥', unit: 'm³', feeKey: 'gas', priceHint: '如 2.8 元/m³' }
 ]
 
-/** 按读数计算费用：(本次 - 上次) × 单价；信息不全或本次<上次返回 null */
+/** 用量 = 本次读数 - 上次读数 - 参考读数（楼上读数，仅楼下有） */
+export function calcMeterUsage(info: MeterInfo): number | null {
+  if (info.lastReading == null || info.currentReading == null) return null
+  const usage = info.currentReading - info.lastReading - (info.refReading ?? 0)
+  return Math.round(usage * 1000) / 1000
+}
+
+/** 按读数计算费用：用量 × 单价；信息不全或用量为负返回 null */
 export function calcMeterFee(info: MeterInfo): number | null {
-  if (info.lastReading == null || info.currentReading == null || info.unitPrice == null) {
-    return null
-  }
-  if (info.currentReading < info.lastReading) return null
-  return Math.round((info.currentReading - info.lastReading) * info.unitPrice * 100) / 100
+  if (info.unitPrice == null) return null
+  const usage = calcMeterUsage(info)
+  if (usage == null || usage < 0) return null
+  return Math.round(usage * info.unitPrice * 100) / 100
 }
 
 /** 取某项费用对应的抄表数据（房租/垃圾费返回 undefined） */
@@ -68,9 +76,10 @@ export function meterInfoOf(record: RentRecord, feeKey: FeeKey): MeterInfo | und
   return undefined
 }
 
-/** 公式文本，如 (862 - 820) × 3.5 */
+/** 公式文本，如 (862 - 820) × 3 或楼下 (1500 - 1400 - 80) × 3 */
 export function meterFormulaText(info: MeterInfo): string {
-  return `(${fmtNum(info.currentReading)} - ${fmtNum(info.lastReading)}) × ${fmtNum(info.unitPrice)}`
+  const ref = info.refReading != null ? ` - ${fmtNum(info.refReading)}` : ''
+  return `(${fmtNum(info.currentReading)} - ${fmtNum(info.lastReading)}${ref}) × ${fmtNum(info.unitPrice)}`
 }
 
 function fmtNum(value: number | undefined): string {

@@ -7,7 +7,6 @@ import { useRentStore, type RecordDraft } from '@/stores/rent'
 import { HOUSE_TYPES, METER_META, type FeeKey, type HouseType, type MeterKey } from '@/types'
 import { formatYuan } from '@/utils/format'
 import { compressImage } from '@/utils/image'
-import { recognizeDigits } from '@/utils/ocr'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,6 +32,22 @@ const form = reactive({
   paid: existing.value?.paid ?? false
 })
 
+/* ===== 单价规则 ===== */
+/** 水费 / 燃气费固定单价 */
+const FIXED_PRICES: Partial<Record<MeterKey, number>> = {
+  water: 3,
+  gas: 3
+}
+
+/** 电价：楼上 0.6，楼下 0.52 */
+function electricityPrice(houseType: HouseType): number {
+  return houseType === 'upstairs' ? 0.6 : 0.52
+}
+
+function defaultPrice(key: MeterKey, houseType: HouseType): number {
+  return key === 'electricity' ? electricityPrice(houseType) : (FIXED_PRICES[key] ?? 0)
+}
+
 function initAmount(value: number | undefined): string {
   return value && value > 0 ? String(value) : ''
 }
@@ -51,37 +66,39 @@ const amountText = reactive<Record<FeeKey, string>>({
 interface MeterFormState {
   /** 是否按读数计算 */
   enabled: boolean
+  /** 上次读数（手动输入） */
   lastReading: string
+  /** 本次读数（手动输入） */
   currentReading: string
+  /** 单价 */
   unitPrice: string
+  /** 抄表照片（仅存档） */
   photo: string
-  recognizing: boolean
-  hint: string
+  /** 楼上本月读数（仅楼下使用，自动从本月楼上记录带出） */
+  upstairsReading: string
 }
 
-function emptyMeter(): MeterFormState {
+function emptyMeter(key: MeterKey): MeterFormState {
   return {
     enabled: false,
     lastReading: '',
     currentReading: '',
-    unitPrice: '',
+    unitPrice: String(defaultPrice(key, form.houseType)),
     photo: '',
-    recognizing: false,
-    hint: ''
+    upstairsReading: ''
   }
 }
 
 function initMeter(key: MeterKey): MeterFormState {
   const info = existing.value?.meters?.[key]
-  if (!info || info.currentReading == null) return emptyMeter()
+  if (!info || info.currentReading == null) return emptyMeter(key)
   return {
     enabled: true,
     lastReading: info.lastReading != null ? String(info.lastReading) : '',
     currentReading: String(info.currentReading),
-    unitPrice: info.unitPrice != null ? String(info.unitPrice) : '',
+    unitPrice: info.unitPrice != null ? String(info.unitPrice) : String(defaultPrice(key, form.houseType)),
     photo: info.photo ?? '',
-    recognizing: false,
-    hint: ''
+    upstairsReading: info.refReading != null ? String(info.refReading) : ''
   }
 }
 
@@ -97,29 +114,93 @@ function toNumber(text: string): number | null {
   return Number.isFinite(value) ? value : null
 }
 
-/** 按读数算出的费用；信息不全或本次<上次返回 null */
-function meterFeeOf(key: MeterKey): number | null {
-  const state = meters[key]
-  const last = toNumber(state.lastReading)
-  const current = toNumber(state.currentReading)
-  const price = toNumber(state.unitPrice)
-  if (last == null || current == null || price == null) return null
-  if (current < last) return null
-  return Math.round((current - last) * price * 100) / 100
+/* ===== 楼下：自动带出本月楼上读数 ===== */
+
+const isDownstairs = computed(() => form.houseType === 'downstairs')
+
+/** 从本月「楼上」记录带出水/电/气本次读数（只读展示并参与公式） */
+function syncUpstairsReadings(): void {
+  if (!isDownstairs.value) return
+  const upstairs = store.findLatestHouseRecord('upstairs', form.year, form.month)
+  for (const meta of METER_META) {
+    meters[meta.key].upstairsReading =
+      upstairs?.meters?.[meta.key]?.currentReading != null
+        ? String(upstairs.meters![meta.key]!.currentReading)
+        : ''
+  }
 }
 
-/** 公式提示文本 */
-function formulaOf(key: MeterKey): string | null {
+watch([isDownstairs, () => form.year, () => form.month], syncUpstairsReadings, {
+  immediate: true
+})
+
+/* ===== 切换房屋类型：电价联动 ===== */
+
+watch(
+  () => form.houseType,
+  (type) => {
+    meters.electricity.unitPrice = String(electricityPrice(type))
+  }
+)
+
+/* ===== 用量与费用计算 ===== */
+
+/** 本次用量：楼上=本次-上次；楼下=本次-上次-楼上本月读数 */
+function meterUsageOf(key: MeterKey): number | null {
   const state = meters[key]
   const last = toNumber(state.lastReading)
   const current = toNumber(state.currentReading)
-  const price = toNumber(state.unitPrice)
-  if (last == null || current == null || price == null) return null
-  return `(${trimNum(current)} - ${trimNum(last)}) × ${trimNum(price)}`
+  if (last == null || current == null) return null
+
+  if (isDownstairs.value) {
+    const ref = toNumber(state.upstairsReading)
+    if (ref == null) return null
+    return Math.round((current - last - ref) * 1000) / 1000
+  }
+  return Math.round((current - last) * 1000) / 1000
+}
+
+function meterPriceOf(key: MeterKey): number | null {
+  return toNumber(meters[key].unitPrice)
+}
+
+function meterFeeOf(key: MeterKey): number | null {
+  const usage = meterUsageOf(key)
+  const price = meterPriceOf(key)
+  if (usage == null || price == null || usage < 0) return null
+  return Math.round(usage * price * 100) / 100
 }
 
 function trimNum(value: number): string {
   return String(Math.round(value * 1000) / 1000)
+}
+
+/** 用量算式：楼上「本次-上次」；楼下「本次-上次-楼上读数」 */
+function usageBreakdownOf(key: MeterKey): string {
+  const state = meters[key]
+  const last = toNumber(state.lastReading)
+  const current = toNumber(state.currentReading)
+  if (last == null || current == null) return ''
+  const ref = isDownstairs.value ? toNumber(state.upstairsReading) : null
+  if (isDownstairs.value && ref == null) return ''
+  return ref != null
+    ? `${trimNum(current)} - ${trimNum(last)} - ${trimNum(ref)}`
+    : `${trimNum(current)} - ${trimNum(last)}`
+}
+
+/** 公式提示：楼上 (本次-上次)×单价；楼下 (本次-上次-楼上读数)×单价 */
+function formulaOf(key: MeterKey): string | null {
+  const state = meters[key]
+  const last = toNumber(state.lastReading)
+  const current = toNumber(state.currentReading)
+  const price = meterPriceOf(key)
+  if (last == null || current == null || price == null) return null
+
+  const ref = isDownstairs.value ? toNumber(state.upstairsReading) : null
+  if (isDownstairs.value && ref == null) return null
+
+  const refPart = ref != null ? ` - ${trimNum(ref)}` : ''
+  return `(${trimNum(current)} - ${trimNum(last)}${refPart}) × ${trimNum(price)}`
 }
 
 function parseAmount(text: string): number {
@@ -127,52 +208,7 @@ function parseAmount(text: string): number {
   return Number.isFinite(value) && value > 0 ? value : 0
 }
 
-/** 自动带出上一次读数和单价（同租客、本月之前最近一次） */
-function autoFillFromHistory(force = false): void {
-  if (!form.tenant.trim()) return
-  for (const meta of METER_META) {
-    const state = meters[meta.key]
-    if (!state.enabled) continue
-    if (!force && state.lastReading !== '' && state.unitPrice !== '') continue
-    const prev = store.findPrevMeter(form.tenant, form.houseType, form.year, form.month, meta.key)
-    if (!prev) continue
-    if (force || state.lastReading === '') {
-      state.lastReading = prev.currentReading != null ? String(prev.currentReading) : ''
-    }
-    if (state.unitPrice === '' && prev.unitPrice != null) {
-      state.unitPrice = String(prev.unitPrice)
-    }
-  }
-}
-
-watch(
-  [() => form.tenant, () => form.year, () => form.month],
-  () => autoFillFromHistory()
-)
-
-function onMeterToggle(key: MeterKey, value: boolean): void {
-  meters[key].enabled = value
-  if (value) autoFillFromHistory()
-}
-
-function refillHistory(key: MeterKey): void {
-  if (!form.tenant.trim()) {
-    showToast('请先填写租客姓名，才能带出历史读数')
-    return
-  }
-  const prev = store.findPrevMeter(form.tenant, form.houseType, form.year, form.month, key)
-  if (!prev || prev.currentReading == null) {
-    showToast(`${METER_META.find((m) => m.key === key)?.label ?? ''}暂无历史读数`)
-    return
-  }
-  meters[key].lastReading = String(prev.currentReading)
-  if (meters[key].unitPrice === '' && prev.unitPrice != null) {
-    meters[key].unitPrice = String(prev.unitPrice)
-  }
-  showToast(`已带出上次读数 ${prev.currentReading}`)
-}
-
-/* ===== 拍照识别 ===== */
+/* ===== 图片上传（仅存档，不识别） ===== */
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const activeMeter = ref<MeterKey | null>(null)
@@ -189,33 +225,17 @@ async function onPhotoChosen(event: Event): Promise<void> {
   const key = activeMeter.value
   if (!file || !key) return
 
-  const state = meters[key]
   try {
-    state.recognizing = true
-    state.hint = '照片处理中…'
-
-    const dataUrl = await compressImage(file)
-    state.photo = dataUrl
-
-    state.hint = '识别中…首次使用需下载识别模型，请稍候'
-    const digits = await recognizeDigits(dataUrl)
-
-    if (digits) {
-      state.currentReading = digits
-      state.hint = `识别为 ${digits}，请核对`
-    } else {
-      state.hint = '未识别到数字，请手动输入读数'
-    }
+    showToast('照片处理中…')
+    meters[key].photo = await compressImage(file)
+    showToast('已上传')
   } catch {
-    state.hint = '识别失败，请手动输入读数'
-  } finally {
-    state.recognizing = false
+    showToast('照片处理失败，请重试')
   }
 }
 
 function removePhoto(key: MeterKey): void {
   meters[key].photo = ''
-  meters[key].hint = ''
 }
 
 function previewPhoto(key: MeterKey): void {
@@ -275,16 +295,24 @@ function buildDraft(): RecordDraft {
 
     const fee = meterFeeOf(meta.key)
     if (fee == null) {
+      if (isDownstairs.value && toNumber(state.upstairsReading) == null) {
+        throw new Error(`请先保存「楼上」${form.year}年${form.month}月的抄表记录，楼下才能自动带出楼上读数`)
+      }
       throw new Error(`请完整填写${meta.feeLabel}的读数和单价，或关闭「按读数计算」`)
     }
 
-    draft[meta.feeKey] = fee
-    draft.meters![meta.key] = {
+    const meterInfo: NonNullable<RecordDraft['meters']>[MeterKey] = {
       lastReading: toNumber(state.lastReading) ?? 0,
       currentReading: toNumber(state.currentReading) ?? 0,
-      unitPrice: toNumber(state.unitPrice) ?? 0,
+      unitPrice: meterPriceOf(meta.key) ?? 0,
       ...(state.photo ? { photo: state.photo } : {})
     }
+    if (isDownstairs.value) {
+      meterInfo.refReading = toNumber(state.upstairsReading) ?? 0
+    }
+
+    draft[meta.feeKey] = fee
+    draft.meters![meta.key] = meterInfo
   }
 
   return draft
@@ -364,6 +392,7 @@ async function onDelete(): Promise<void> {
           input-align="right"
           @click="showMonthPicker = true"
         />
+
         <div class="house-type-row">
           <span class="ht-label">房屋类型</span>
           <div class="ht-options">
@@ -402,7 +431,7 @@ async function onDelete(): Promise<void> {
           input-align="right"
         />
 
-        <!-- 水 / 电 / 气：支持抄表计算 + 拍照识别 -->
+        <!-- 水 / 电 / 气：按读数计算 -->
         <div v-for="meta in METER_META" :key="meta.key" class="meter-block">
           <van-cell center :title="`${meta.emoji} ${meta.feeLabel}`">
             <template #label>
@@ -412,7 +441,7 @@ async function onDelete(): Promise<void> {
               <van-switch
                 :model-value="meters[meta.key].enabled"
                 size="20px"
-                @update:model-value="(val: boolean) => onMeterToggle(meta.key, val)"
+                @update:model-value="(val: boolean) => (meters[meta.key].enabled = val)"
               />
             </template>
           </van-cell>
@@ -422,34 +451,32 @@ async function onDelete(): Promise<void> {
               v-model="meters[meta.key].lastReading"
               type="number"
               label="上次读数"
-              placeholder="自动带出，可修改"
+              placeholder="手动输入上次读数"
               input-align="right"
-            >
-              <template #right-icon>
-                <van-icon
-                  name="replay"
-                  class="refill-icon"
-                  title="从历史带出"
-                  @click="refillHistory(meta.key)"
-                />
-              </template>
-            </van-field>
+            />
             <van-field
               v-model="meters[meta.key].currentReading"
               type="number"
               label="本次读数"
-              placeholder="拍照识别或输入"
+              placeholder="手动输入本次读数"
               input-align="right"
             />
 
+            <!-- 楼下：自动带出本月楼上读数（只读） -->
+            <div v-if="isDownstairs" class="ref-reading" :class="{ missing: meters[meta.key].upstairsReading === '' }">
+              <template v-if="meters[meta.key].upstairsReading !== ''">
+                ⬆️ 楼上本月读数：<b>{{ meters[meta.key].upstairsReading }}</b>
+                <span class="ref-tip">（自动带出，用量将扣除此读数）</span>
+              </template>
+              <template v-else>
+                ⚠️ 未找到楼上本月记录，请先保存「楼上」{{ form.year }}年{{ form.month }}月的抄表数据
+              </template>
+            </div>
+
             <div class="photo-row">
-              <button
-                class="photo-btn"
-                :disabled="meters[meta.key].recognizing"
-                @click="pickPhoto(meta.key)"
-              >
+              <button type="button" class="photo-btn" @click="pickPhoto(meta.key)">
                 <van-icon name="photograph" />
-                {{ meters[meta.key].photo ? '重新拍照' : '拍照识别' }}
+                {{ meters[meta.key].photo ? '重新上传图片' : '上传图片' }}
               </button>
 
               <div v-if="meters[meta.key].photo" class="photo-preview">
@@ -458,7 +485,7 @@ async function onDelete(): Promise<void> {
                   alt="抄表照片"
                   @click="previewPhoto(meta.key)"
                 />
-                <button class="photo-del" aria-label="删除照片" @click="removePhoto(meta.key)">
+                <button class="photo-del" aria-label="删除图片" @click="removePhoto(meta.key)">
                   <van-icon name="cross" />
                 </button>
               </div>
@@ -469,18 +496,22 @@ async function onDelete(): Promise<void> {
               type="number"
               :label="`单价(元/${meta.unit})`"
               :placeholder="meta.priceHint"
+              :readonly="meta.key !== 'electricity'"
               input-align="right"
             />
 
-            <div v-if="meters[meta.key].hint" class="meter-hint" :class="{ ok: meters[meta.key].hint.startsWith('识别为') }">
-              {{ meters[meta.key].recognizing ? '⏳ ' : '' }}{{ meters[meta.key].hint }}
+            <div v-if="meterUsageOf(meta.key) !== null" class="meter-usage" :class="{ 'warn-bg': meterUsageOf(meta.key)! < 0 }">
+              <template v-if="meterUsageOf(meta.key)! < 0">⚠️</template>
+              <template v-else>📊</template>
+              本次用量：<b>{{ meterUsageOf(meta.key) }}</b> {{ meta.unit }}
+              <span class="usage-tip">（{{ usageBreakdownOf(meta.key) }}）</span>
             </div>
 
             <div v-if="formulaOf(meta.key) !== null" class="meter-formula">
               🧮 公式：{{ formulaOf(meta.key) }} =
               <b>{{ formatYuan(meterFeeOf(meta.key) ?? 0) }}</b>
-              <span v-if="meterFeeOf(meta.key) === null" class="formula-warn">
-                （本次读数不能小于上次读数）
+              <span v-if="meterUsageOf(meta.key) !== null && meterUsageOf(meta.key)! < 0" class="formula-warn">
+                （用量为负，请检查读数）
               </span>
             </div>
           </template>
@@ -631,19 +662,32 @@ async function onDelete(): Promise<void> {
   border-top: 1px solid #f0f0f0;
 }
 
-.meter-block:first-of-type {
-  border-top: none;
-}
-
 .meter-sub {
   font-size: 12px;
   color: var(--text-sub);
 }
 
-.refill-icon {
-  color: var(--app-primary);
-  font-size: 16px;
-  cursor: pointer;
+.ref-reading {
+  margin: 0 16px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #eef3ff;
+  color: #4f7cff;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.ref-reading.missing {
+  background: #fff7e8;
+  color: #d48806;
+}
+
+.ref-reading b {
+  font-size: 13px;
+}
+
+.ref-tip {
+  opacity: 0.75;
 }
 
 .photo-row {
@@ -665,10 +709,6 @@ async function onDelete(): Promise<void> {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-}
-
-.photo-btn:disabled {
-  opacity: 0.55;
 }
 
 .photo-preview {
@@ -701,24 +741,44 @@ async function onDelete(): Promise<void> {
   cursor: pointer;
 }
 
-.meter-hint {
-  padding: 0 16px 8px;
-  font-size: 12px;
-  color: var(--text-sub);
+.meter-usage {
+  margin: 0 16px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #f0f7ff;
+  color: #1677ff;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
-.meter-hint.ok {
-  color: var(--app-primary);
+.meter-usage.warn-bg {
+  background: #fff1f0;
+  color: #ee0a24;
+}
+
+.meter-usage b {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-tip {
+  font-size: 11px;
+  opacity: 0.7;
 }
 
 .meter-formula {
-  margin: 0 16px 12px;
+  margin: 8px 16px 12px;
   padding: 9px 12px;
   border-radius: 8px;
   background: #f6ffed;
   color: #389e0d;
   font-size: 13px;
   line-height: 1.6;
+}
+
+.meter-formula.warn-bg {
+  background: #fff1f0;
+  color: #ee0a24;
 }
 
 .meter-formula b {

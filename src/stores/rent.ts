@@ -117,6 +117,20 @@ export const useRentStore = defineStore('rent', () => {
     )?.meters?.[meter]
   }
 
+  /** 查询某房屋类型在指定年月的最新一条记录（如：楼下带出楼上本月读数） */
+  function findLatestHouseRecord(
+    houseType: HouseType,
+    year: number,
+    month: number
+  ): RentRecord | undefined {
+    const list = [...records.value]
+      .filter(
+        (r) => !r.deleted && r.houseType === houseType && r.year === year && r.month === month
+      )
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+    return list.length > 0 ? list[0] : undefined
+  }
+
   function findById(id: string): RentRecord | undefined {
     return records.value.find((r) => r.id === id)
   }
@@ -231,6 +245,7 @@ export const useRentStore = defineStore('rent', () => {
     sortedRecords,
     recordsOfMonth,
     findPrevMeter,
+    findLatestHouseRecord,
     findById,
     findDuplicate,
     saveRecord,
