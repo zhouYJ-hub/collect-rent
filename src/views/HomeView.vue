@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { showConfirmDialog, showToast } from 'vant'
+import { closeToast, showConfirmDialog, showLoadingToast, showToast } from 'vant'
 
 import { useRentStore } from '@/stores/rent'
 import { useSyncStore } from '@/stores/sync'
 import { FEE_META, houseTypeMeta, recordTotal, type FeeMeta, type RentRecord } from '@/types'
 import { buildBillText } from '@/utils/bill'
-import { copyText } from '@/utils/clipboard'
+import { renderBillImage } from '@/utils/billImage'
+import { copyImage, copyText } from '@/utils/clipboard'
 import { formatYuan } from '@/utils/format'
 
 const router = useRouter()
@@ -72,56 +73,84 @@ function onTogglePaid(record: RentRecord): void {
   showToast(record.paid ? '已标记为未收' : '已标记为已收')
 }
 
-/* ===== 分享账单给租客 ===== */
+/* ===== 分享账单截图给租客 ===== */
 
 const showSharePopup = ref(false)
 const shareText = ref('')
+const shareImageUrl = ref('')
+const shareBlob = ref<Blob | null>(null)
 
 type ShareCapableNavigator = Navigator & {
-  share?: (data: { title?: string; text?: string }) => Promise<void>
+  share?: (data: { title?: string; text?: string; files?: File[] }) => Promise<void>
+  canShare?: (data: { files?: File[] }) => boolean
 }
 
-const canNativeShare = computed(() => {
+const canShareImage = computed(() => {
+  if (!shareBlob.value) return false
   const nav = navigator as ShareCapableNavigator
-  return typeof nav.share === 'function'
+  if (typeof nav.share !== 'function' || typeof nav.canShare !== 'function') return false
+  const file = new File([shareBlob.value], 'bill.png', { type: 'image/png' })
+  return nav.canShare({ files: [file] })
 })
 
+watch(showSharePopup, (visible) => {
+  if (visible) return
+  if (shareImageUrl.value) URL.revokeObjectURL(shareImageUrl.value)
+  shareImageUrl.value = ''
+  shareBlob.value = null
+})
+
+/** 点击分享：生成截图 → 直接复制到剪贴板；失败则弹图长按转发 */
 async function onShare(record: RentRecord): Promise<void> {
-  const text = buildBillText(record)
-
-  if (canNativeShare.value) {
-    const nav = navigator as ShareCapableNavigator
-    try {
-      await nav.share!({
-        title: `${record.year}年${record.month}月房租账单`,
-        text
-      })
-      return
-    } catch (error) {
-      // 用户取消系统分享面板，不弹兜底窗
-      if (error instanceof DOMException && error.name === 'AbortError') return
-      // 其他失败继续走弹窗兜底
-    }
-  }
-
-  shareText.value = text
-  showSharePopup.value = true
-}
-
-async function copyBill(): Promise<void> {
-  const ok = await copyText(shareText.value)
-  showToast(ok ? '已复制，去微信粘贴给租客吧' : '复制失败，请长按文字手动复制')
-}
-
-async function nativeShareFromPopup(): Promise<void> {
-  if (!canNativeShare.value) return
-  const nav = navigator as ShareCapableNavigator
+  showLoadingToast({ message: '正在生成截图…', forbidClick: true, duration: 0 })
   try {
-    await nav.share!({ title: '房租账单', text: shareText.value })
+    const blob = await renderBillImage(record)
+    shareBlob.value = blob
+    shareImageUrl.value = URL.createObjectURL(blob)
+    shareText.value = buildBillText(record)
+
+    // 弹窗中展示账单截图，用户通过 复制/长按/系统分享 发给租客
+    showSharePopup.value = true
+  } catch {
+    showToast('截图生成失败，请重试')
+  } finally {
+    closeToast()
+  }
+}
+
+/** 弹窗内再次尝试复制截图 */
+async function copyImageAgain(): Promise<void> {
+  if (!shareBlob.value) return
+  const ok = await copyImage(shareBlob.value)
+  showToast(ok ? '截图已复制，去微信粘贴' : '当前浏览器不支持复制图片，请长按截图发送')
+}
+
+/** 系统分享（支持分享图片文件的浏览器） */
+async function nativeShareImage(): Promise<void> {
+  if (!shareBlob.value) return
+  const nav = navigator as ShareCapableNavigator
+  const file = new File([shareBlob.value], 'bill.png', { type: 'image/png' })
+  try {
+    await nav.share!({ title: '房租账单', files: [file] })
     showSharePopup.value = false
   } catch {
-    // 忽略取消/失败，停留在弹窗
+    // 用户取消或失败，停留在弹窗
   }
+}
+
+/** 保存图片到本地 */
+function saveImage(): void {
+  if (!shareImageUrl.value) return
+  const link = document.createElement('a')
+  link.href = shareImageUrl.value
+  link.download = `房租账单-${new Date().getFullYear()}-${new Date().getMonth() + 1}.png`
+  link.click()
+}
+
+/** 文字版兜底 */
+async function copyTextVersion(): Promise<void> {
+  const ok = await copyText(shareText.value)
+  showToast(ok ? '文字版已复制' : '复制失败，请重试')
 }
 
 async function onDelete(record: RentRecord): Promise<void> {
@@ -330,26 +359,28 @@ function avatarStyle(name: string): { background: string } {
     >
       <div class="share-sheet">
         <div class="share-header">
-          <span class="share-title">账单预览</span>
+          <span class="share-title">账单截图</span>
           <button class="share-close" aria-label="关闭" @click="showSharePopup = false">
             <van-icon name="cross" />
           </button>
         </div>
-        <pre class="share-text">{{ shareText }}</pre>
+
+        <div class="share-img-wrap">
+          <img v-if="shareImageUrl" :src="shareImageUrl" class="share-img" alt="账单截图" />
+        </div>
+
         <div class="share-actions">
-          <van-button round block type="primary" @click="copyBill">复制文字</van-button>
-          <van-button
-            v-if="canNativeShare"
-            round
-            block
-            plain
-            type="primary"
-            @click="nativeShareFromPopup"
-          >
+          <van-button round type="primary" @click="copyImageAgain">复制截图</van-button>
+          <van-button v-if="canShareImage" round plain type="primary" @click="nativeShareImage">
             系统分享
           </van-button>
+          <van-button round plain type="default" @click="saveImage">保存图片</van-button>
         </div>
-        <p class="share-tip">💡 复制后可粘贴到微信 / 短信发给租客</p>
+
+        <p class="share-tip">
+          💡 在微信里可<b>长按截图</b>直接发送给租客；已复制的可直接粘贴
+        </p>
+        <button class="text-fallback" @click="copyTextVersion">复制文字版账单 →</button>
       </div>
     </van-popup>
   </div>
@@ -756,20 +787,28 @@ function avatarStyle(name: string): { background: string } {
   cursor: pointer;
 }
 
-.share-text {
-  margin: 0;
-  padding: 14px;
-  max-height: 44vh;
+.share-img-wrap {
+  max-height: 48vh;
   overflow: auto;
   border-radius: 12px;
-  background: #f7f8fa;
-  font-family: inherit;
-  font-size: 14px;
-  line-height: 1.8;
-  white-space: pre-wrap;
-  word-break: break-all;
-  -webkit-user-select: text;
-  user-select: text;
+  background: #f0f2f5;
+  -webkit-overflow-scrolling: touch;
+}
+
+.share-img {
+  display: block;
+  width: 100%;
+}
+
+.text-fallback {
+  display: block;
+  margin: 2px auto 0;
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  color: var(--app-primary);
+  font-size: 13px;
+  cursor: pointer;
 }
 
 .share-actions {

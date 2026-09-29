@@ -27,3 +27,16 @@ export async function copyText(text: string): Promise<boolean> {
     return false
   }
 }
+
+/** 复制图片到剪贴板（截图分享用），不支持时返回 false */
+export async function copyImage(blob: Blob): Promise<boolean> {
+  try {
+    if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
+      return false
+    }
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+    return true
+  } catch {
+    return false
+  }
+}
