@@ -289,9 +289,13 @@ const maxDate = new Date(2035, 11, 1)
 const pickerValue = computed(() => [String(form.year), String(form.month).padStart(2, '0')])
 const monthText = computed(() => `${form.year}年${form.month}月`)
 
-function onMonthConfirm(date: Date): void {
-  form.year = date.getFullYear()
-  form.month = date.getMonth() + 1
+function onMonthConfirm(selected: { selectedValues: Array<string | number> }): void {
+  const year = Number(selected.selectedValues[0])
+  const month = Number(selected.selectedValues[1])
+  if (Number.isFinite(year) && Number.isFinite(month) && month >= 1 && month <= 12) {
+    form.year = year
+    form.month = month
+  }
   showMonthPicker.value = false
 }
 
@@ -614,7 +618,7 @@ async function onDelete(): Promise<void> {
     <van-popup v-model:show="showMonthPicker" position="bottom" round>
       <van-date-picker
         :model-value="pickerValue"
-        type="year-month"
+        :columns-type="['year', 'month']"
         title="选择月份"
         :min-date="minDate"
         :max-date="maxDate"
