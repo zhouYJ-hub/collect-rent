@@ -96,21 +96,18 @@ export const useRentStore = defineStore('rent', () => {
   }
 
   /**
-   * 查询某租客指定月份之前、最近一次的抄表数据。
-   * 用于自动带出「上次读数」和「单价」。
+   * 查询同房屋类型（楼上/楼下）在指定月份之前、最近一次的抄表数据，
+   * 与租客姓名无关。用于自动带出「上次读数」。
    */
   function findPrevMeter(
-    tenant: string,
     houseType: HouseType,
     year: number,
     month: number,
     meter: MeterKey
   ): MeterInfo | undefined {
-    const name = tenant.trim()
     return sortedRecords.value.find(
       (r) =>
         !r.deleted &&
-        r.tenant.trim() === name &&
         r.houseType === houseType &&
         (r.year < year || (r.year === year && r.month < month)) &&
         r.meters?.[meter]?.currentReading != null

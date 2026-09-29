@@ -131,14 +131,13 @@ function syncUpstairsUsage(): void {
   }
 }
 
-/* ===== 上次读数自动带出：同租客 + 同房屋类型，本月之前最近一次的「本次读数」 ===== */
+/* ===== 上次读数自动带出：同房屋类型（楼上/楼下），本月之前最近一次的「本次读数」，与租客无关 ===== */
 
 function autoFillLastReadings(): void {
-  if (!form.tenant.trim()) return
   for (const meta of METER_META) {
     const state = meters[meta.key]
     if (!state.enabled || state.lastReading.trim() !== '') continue
-    const prev = store.findPrevMeter(form.tenant, form.houseType, form.year, form.month, meta.key)
+    const prev = store.findPrevMeter(form.houseType, form.year, form.month, meta.key)
     if (prev?.currentReading != null && prev.currentReading > 0) {
       state.lastReading = String(prev.currentReading)
     }
@@ -148,11 +147,7 @@ function autoFillLastReadings(): void {
 /** 手动刷新：强制带出上次读数；无历史则清空并提示（不会带出 0） */
 function refillLastReading(key: MeterKey): void {
   const label = METER_META.find((m) => m.key === key)?.label ?? ''
-  if (!form.tenant.trim()) {
-    showToast('请先填写租客姓名，才能带出上次读数')
-    return
-  }
-  const prev = store.findPrevMeter(form.tenant, form.houseType, form.year, form.month, key)
+  const prev = store.findPrevMeter(form.houseType, form.year, form.month, key)
   if (prev?.currentReading == null || prev.currentReading <= 0) {
     meters[key].lastReading = ''
     showToast(`${label}暂无历史读数，请手动输入`)
@@ -163,7 +158,7 @@ function refillLastReading(key: MeterKey): void {
 }
 
 watch(
-  [() => form.tenant, () => form.houseType, () => form.year, () => form.month],
+  [() => form.houseType, () => form.year, () => form.month],
   () => {
     syncUpstairsUsage()
     autoFillLastReadings()
@@ -500,7 +495,7 @@ async function onDelete(): Promise<void> {
               v-model="meters[meta.key].lastReading"
               type="number"
               label="上次读数"
-              placeholder="点击↻带出或手动输入"
+              placeholder="自动带出同类型上次读数"
               input-align="right"
             >
               <template #right-icon>
