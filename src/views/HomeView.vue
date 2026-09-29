@@ -5,6 +5,8 @@ import { showConfirmDialog, showToast } from 'vant'
 
 import { useRentStore } from '@/stores/rent'
 import { FEE_META, recordTotal, type FeeMeta, type RentRecord } from '@/types'
+import { buildBillText } from '@/utils/bill'
+import { copyText } from '@/utils/clipboard'
 import { formatYuan } from '@/utils/format'
 
 const router = useRouter()
@@ -55,6 +57,58 @@ function onCardClick(record: RentRecord): void {
 function onTogglePaid(record: RentRecord): void {
   store.togglePaid(record.id)
   showToast(record.paid ? '已标记为未收' : '已标记为已收')
+}
+
+/* ===== 分享账单给租客 ===== */
+
+const showSharePopup = ref(false)
+const shareText = ref('')
+
+type ShareCapableNavigator = Navigator & {
+  share?: (data: { title?: string; text?: string }) => Promise<void>
+}
+
+const canNativeShare = computed(() => {
+  const nav = navigator as ShareCapableNavigator
+  return typeof nav.share === 'function'
+})
+
+async function onShare(record: RentRecord): Promise<void> {
+  const text = buildBillText(record)
+
+  if (canNativeShare.value) {
+    const nav = navigator as ShareCapableNavigator
+    try {
+      await nav.share!({
+        title: `${record.year}年${record.month}月房租账单`,
+        text
+      })
+      return
+    } catch (error) {
+      // 用户取消系统分享面板，不弹兜底窗
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      // 其他失败继续走弹窗兜底
+    }
+  }
+
+  shareText.value = text
+  showSharePopup.value = true
+}
+
+async function copyBill(): Promise<void> {
+  const ok = await copyText(shareText.value)
+  showToast(ok ? '已复制，去微信粘贴给租客吧' : '复制失败，请长按文字手动复制')
+}
+
+async function nativeShareFromPopup(): Promise<void> {
+  if (!canNativeShare.value) return
+  const nav = navigator as ShareCapableNavigator
+  try {
+    await nav.share!({ title: '房租账单', text: shareText.value })
+    showSharePopup.value = false
+  } catch {
+    // 忽略取消/失败，停留在弹窗
+  }
 }
 
 async function onDelete(record: RentRecord): Promise<void> {
@@ -214,8 +268,14 @@ function avatarStyle(name: string): { background: string } {
           <div v-if="record.note" class="record-note">备注：{{ record.note }}</div>
 
           <div class="record-foot">
-            <span class="foot-label">合计</span>
-            <span class="foot-total">{{ formatYuan(recordTotal(record)) }}</span>
+            <div class="foot-left">
+              <span class="foot-label">合计</span>
+              <span class="foot-total">{{ formatYuan(recordTotal(record)) }}</span>
+            </div>
+            <button class="share-btn" @click.stop="onShare(record)">
+              <van-icon name="share-o" />
+              发给租客
+            </button>
           </div>
         </div>
       </van-swipe-cell>
@@ -225,6 +285,38 @@ function avatarStyle(name: string): { background: string } {
       <van-icon name="plus" />
       <span>记一笔</span>
     </button>
+
+    <!-- 分享账单弹窗 -->
+    <van-popup
+      v-model:show="showSharePopup"
+      position="bottom"
+      round
+      class="share-popup"
+    >
+      <div class="share-sheet">
+        <div class="share-header">
+          <span class="share-title">账单预览</span>
+          <button class="share-close" aria-label="关闭" @click="showSharePopup = false">
+            <van-icon name="cross" />
+          </button>
+        </div>
+        <pre class="share-text">{{ shareText }}</pre>
+        <div class="share-actions">
+          <van-button round block type="primary" @click="copyBill">复制文字</van-button>
+          <van-button
+            v-if="canNativeShare"
+            round
+            block
+            plain
+            type="primary"
+            @click="nativeShareFromPopup"
+          >
+            系统分享
+          </van-button>
+        </div>
+        <p class="share-tip">💡 复制后可粘贴到微信 / 短信发给租客</p>
+      </div>
+    </van-popup>
   </div>
 </template>
 
@@ -479,9 +571,36 @@ function avatarStyle(name: string): { background: string } {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid #f0f0f0;
+}
+
+.foot-left {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.share-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 13px;
+  border: 1px solid var(--app-primary);
+  border-radius: 999px;
+  background: #e8f8f1;
+  color: var(--app-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.share-btn:active {
+  opacity: 0.75;
 }
 
 .foot-label {
@@ -517,5 +636,74 @@ function avatarStyle(name: string): { background: string } {
 
 .fab:active {
   transform: scale(0.94);
+}
+
+/* 分享弹窗 */
+.share-popup {
+  max-width: 640px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.share-sheet {
+  padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+}
+
+.share-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.share-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.share-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: #f0f2f5;
+  color: var(--text-sub);
+  cursor: pointer;
+}
+
+.share-text {
+  margin: 0;
+  padding: 14px;
+  max-height: 44vh;
+  overflow: auto;
+  border-radius: 12px;
+  background: #f7f8fa;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-all;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.share-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.share-actions .van-button {
+  flex: 1;
+}
+
+.share-tip {
+  margin: 12px 0 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-sub);
 }
 </style>
