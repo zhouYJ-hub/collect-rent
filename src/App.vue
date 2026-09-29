@@ -19,10 +19,11 @@ useSyncStore()
       </transition>
     </router-view>
 
+    <!-- 固定悬浮在底部，不占文档流（页面自身留出底部安全距离） -->
     <van-tabbar
       v-if="showTabbar"
       route
-      placeholder
+      fixed
       safe-area-inset-bottom
       class="app-tabbar"
     >

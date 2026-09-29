@@ -46,7 +46,8 @@ body {
   min-height: 100vh;
   background: var(--page-bg);
   box-shadow: 0 0 24px rgba(31, 45, 61, 0.08);
-  padding-bottom: calc(84px + env(safe-area-inset-bottom));
+  /* 底部留白 = 固定 Tabbar(50px) + 16px 呼吸空间，避免多余空白滚动 */
+  padding-bottom: calc(66px + env(safe-area-inset-bottom));
 }
 
 /* 页面切换动画 */
