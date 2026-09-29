@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showImagePreview, showToast } from 'vant'
 
 import { useRentStore, type RecordDraft } from '@/stores/rent'
-import { METER_META, type FeeKey, type MeterKey } from '@/types'
+import { HOUSE_TYPES, METER_META, type FeeKey, type HouseType, type MeterKey } from '@/types'
 import { formatYuan } from '@/utils/format'
 import { compressImage } from '@/utils/image'
 import { recognizeDigits } from '@/utils/ocr'
@@ -27,6 +27,7 @@ const now = new Date()
 const form = reactive({
   year: existing.value?.year ?? now.getFullYear(),
   month: existing.value?.month ?? now.getMonth() + 1,
+  houseType: (existing.value?.houseType ?? 'upstairs') as HouseType,
   tenant: existing.value?.tenant ?? '',
   note: existing.value?.note ?? '',
   paid: existing.value?.paid ?? false
@@ -133,7 +134,7 @@ function autoFillFromHistory(force = false): void {
     const state = meters[meta.key]
     if (!state.enabled) continue
     if (!force && state.lastReading !== '' && state.unitPrice !== '') continue
-    const prev = store.findPrevMeter(form.tenant, form.year, form.month, meta.key)
+    const prev = store.findPrevMeter(form.tenant, form.houseType, form.year, form.month, meta.key)
     if (!prev) continue
     if (force || state.lastReading === '') {
       state.lastReading = prev.currentReading != null ? String(prev.currentReading) : ''
@@ -159,7 +160,7 @@ function refillHistory(key: MeterKey): void {
     showToast('请先填写租客姓名，才能带出历史读数')
     return
   }
-  const prev = store.findPrevMeter(form.tenant, form.year, form.month, key)
+  const prev = store.findPrevMeter(form.tenant, form.houseType, form.year, form.month, key)
   if (!prev || prev.currentReading == null) {
     showToast(`${METER_META.find((m) => m.key === key)?.label ?? ''}暂无历史读数`)
     return
@@ -253,6 +254,7 @@ function buildDraft(): RecordDraft {
   const draft: RecordDraft = {
     year: form.year,
     month: form.month,
+    houseType: form.houseType,
     tenant: form.tenant,
     rent: parseAmount(amountText.rent),
     water: 0,
@@ -362,6 +364,23 @@ async function onDelete(): Promise<void> {
           input-align="right"
           @click="showMonthPicker = true"
         />
+        <div class="house-type-row">
+          <span class="ht-label">房屋类型</span>
+          <div class="ht-options">
+            <button
+              v-for="t in HOUSE_TYPES"
+              :key="t.value"
+              type="button"
+              class="ht-option"
+              :class="{ active: form.houseType === t.value }"
+              :style="{ '--ht-color': t.color }"
+              @click="form.houseType = t.value"
+            >
+              {{ t.emoji }} {{ t.label }}
+            </button>
+          </div>
+        </div>
+
         <van-field
           v-model="form.tenant"
           label="租客"
@@ -558,6 +577,53 @@ async function onDelete(): Promise<void> {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-sub);
+}
+
+/* ===== 房屋类型选择 ===== */
+.house-type-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 16px;
+  font-size: 14px;
+}
+
+.ht-label {
+  flex-shrink: 0;
+  color: var(--text-main);
+}
+
+.ht-label::after {
+  content: ' *';
+  color: #ee0a24;
+}
+
+.ht-options {
+  flex: 1;
+  display: flex;
+  gap: 10px;
+}
+
+.ht-option {
+  flex: 1;
+  padding: 9px 0;
+  border: 1px solid #dcdee0;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text-main);
+  font-size: 14px;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.ht-option.active {
+  border-color: var(--ht-color);
+  background: color-mix(in srgb, var(--ht-color) 10%, white);
+  color: var(--ht-color);
+  font-weight: 700;
 }
 
 /* ===== 抄表区块 ===== */

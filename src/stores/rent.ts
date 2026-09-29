@@ -1,7 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 
-import type { FeeKey, MeterInfo, MeterKey, RentRecord } from '@/types'
+import type { FeeKey, HouseType, MeterInfo, MeterKey, RentRecord } from '@/types'
 import { recordTotal } from '@/types'
 import { genId } from '@/utils/id'
 
@@ -11,6 +11,7 @@ const STORAGE_KEY = 'zyj-collect-rent:records:v1'
 export interface RecordDraft {
   year: number
   month: number
+  houseType: HouseType
   tenant: string
   rent: number
   water: number
@@ -100,6 +101,7 @@ export const useRentStore = defineStore('rent', () => {
    */
   function findPrevMeter(
     tenant: string,
+    houseType: HouseType,
     year: number,
     month: number,
     meter: MeterKey
@@ -109,6 +111,7 @@ export const useRentStore = defineStore('rent', () => {
       (r) =>
         !r.deleted &&
         r.tenant.trim() === name &&
+        r.houseType === houseType &&
         (r.year < year || (r.year === year && r.month < month)) &&
         r.meters?.[meter]?.currentReading != null
     )?.meters?.[meter]
@@ -125,6 +128,7 @@ export const useRentStore = defineStore('rent', () => {
       (r) =>
         r.id !== excludeId &&
         !r.deleted &&
+        r.houseType === draft.houseType &&
         r.year === draft.year &&
         r.month === draft.month &&
         r.tenant.trim() === tenant

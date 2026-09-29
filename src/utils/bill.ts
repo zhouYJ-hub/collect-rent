@@ -1,4 +1,4 @@
-import { FEE_META, meterFormulaText, meterInfoOf, recordTotal, type RentRecord } from '@/types'
+import { FEE_META, houseTypeMeta, meterFormulaText, meterInfoOf, recordTotal, type RentRecord } from '@/types'
 import { formatYuan } from '@/utils/format'
 
 /** 生成发给租客的文字账单 */
@@ -7,7 +7,8 @@ export function buildBillText(record: RentRecord): string {
   lines.push(`🏠 ${record.year}年${record.month}月 房租账单`)
 
   if (record.tenant.trim()) {
-    lines.push(`租客：${record.tenant.trim()}`)
+    const type = houseTypeMeta(record.houseType)
+    lines.push(`租客：${record.tenant.trim()}${type ? `（${type.label}）` : ''}`)
   }
   lines.push('')
 

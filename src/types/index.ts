@@ -1,3 +1,22 @@
+/** 房屋类型（楼层） */
+export type HouseType = 'upstairs' | 'downstairs'
+
+export interface HouseTypeMeta {
+  value: HouseType
+  label: string
+  emoji: string
+  color: string
+}
+
+export const HOUSE_TYPES: HouseTypeMeta[] = [
+  { value: 'upstairs', label: '楼上', emoji: '⬆️', color: '#4f7cff' },
+  { value: 'downstairs', label: '楼下', emoji: '⬇️', color: '#d48806' }
+]
+
+export function houseTypeMeta(value: HouseType | undefined): HouseTypeMeta | undefined {
+  return HOUSE_TYPES.find((t) => t.value === value)
+}
+
 /** 水电气表的抄表数据 */
 export interface MeterInfo {
   /** 上次读数 */
@@ -63,6 +82,8 @@ export interface RentRecord {
   id: string
   year: number
   month: number
+  /** 房屋类型：楼上 / 楼下 */
+  houseType?: HouseType
   /** 租客姓名 */
   tenant: string
   /** 房租 */

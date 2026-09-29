@@ -5,7 +5,7 @@ import { showConfirmDialog, showToast } from 'vant'
 
 import { useRentStore } from '@/stores/rent'
 import { useSyncStore } from '@/stores/sync'
-import { FEE_META, recordTotal, type FeeMeta, type RentRecord } from '@/types'
+import { FEE_META, houseTypeMeta, recordTotal, type FeeMeta, type RentRecord } from '@/types'
 import { buildBillText } from '@/utils/bill'
 import { copyText } from '@/utils/clipboard'
 import { formatYuan } from '@/utils/format'
@@ -147,6 +147,15 @@ function feesOf(record: RentRecord): FeeWithAmount[] {
   )
 }
 
+function houseTag(record: RentRecord): string {
+  const meta = houseTypeMeta(record.houseType)
+  return meta ? `${meta.emoji} ${meta.label}` : ''
+}
+
+function houseColor(record: RentRecord): string {
+  return houseTypeMeta(record.houseType)?.color ?? '#969799'
+}
+
 function initials(name: string): string {
   const trimmed = name.trim()
   return trimmed ? Array.from(trimmed)[0]!.toUpperCase() : '租'
@@ -253,7 +262,16 @@ function avatarStyle(name: string): { background: string } {
               {{ initials(record.tenant) }}
             </span>
             <div class="head-info">
-              <div class="tenant-name">{{ record.tenant }}</div>
+              <div class="tenant-line">
+                <span class="tenant-name">{{ record.tenant }}</span>
+                <span
+                  v-if="houseTag(record)"
+                  class="house-tag"
+                  :style="{ '--tag-color': houseColor(record) }"
+                >
+                  {{ houseTag(record) }}
+                </span>
+              </div>
               <div class="record-date">
                 {{ record.year }}年{{ record.month }}月 · 点击编辑
               </div>
@@ -543,12 +561,29 @@ function avatarStyle(name: string): { background: string } {
   min-width: 0;
 }
 
+.tenant-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .tenant-name {
   font-size: 16px;
   font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.house-tag {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--tag-color) 12%, white);
+  color: var(--tag-color);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .record-date {
