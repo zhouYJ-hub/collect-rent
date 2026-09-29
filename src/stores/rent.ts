@@ -1,7 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 
-import type { FeeKey, HouseType, MeterInfo, MeterKey, RentRecord } from '@/types'
+import type { FeeKey, HouseType, MeterInfo, MeterKey, RefRange, RentRecord } from '@/types'
 import { recordTotal } from '@/types'
 import { genId } from '@/utils/id'
 
@@ -21,6 +21,7 @@ export interface RecordDraft {
   note: string
   paid: boolean
   meters?: Partial<Record<MeterKey, MeterInfo>>
+  refRange?: RefRange
 }
 
 export interface PeriodSummary {

@@ -4,7 +4,14 @@ import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showImagePreview, showToast } from 'vant'
 
 import { useRentStore, type RecordDraft } from '@/stores/rent'
-import { HOUSE_TYPES, METER_META, type FeeKey, type HouseType, type MeterKey } from '@/types'
+import {
+  HOUSE_TYPES,
+  METER_META,
+  type FeeKey,
+  type HouseType,
+  type MeterKey,
+  type RefRange
+} from '@/types'
 import { formatYuan } from '@/utils/format'
 import { compressImage } from '@/utils/image'
 
@@ -114,13 +121,114 @@ function toNumber(text: string): number | null {
   return Number.isFinite(value) ? value : null
 }
 
-/* ===== 楼下：自动带出本月楼上读数 ===== */
+/* ===== 楼下：楼上用量期间选择（差值计算） ===== */
 
 const isDownstairs = computed(() => form.houseType === 'downstairs')
+
+const refRangeFrom = ref('')
+const refRangeTo = ref('')
+const showRangeFromPicker = ref(false)
+const showRangeToPicker = ref(false)
+
+function initRefRange(): void {
+  const range = existing.value?.refRange
+  if (!range) return
+  refRangeFrom.value = `${range.fromYear}-${String(range.fromMonth).padStart(2, '0')}`
+  refRangeTo.value = `${range.toYear}-${String(range.toMonth).padStart(2, '0')}`
+}
+initRefRange()
+
+function parseYM(ym: string): [number, number] {
+  const [year, month] = ym.split('-')
+  return [Number(year), Number(month)]
+}
+
+function formatYM(ym: string): string {
+  if (!ym) return ''
+  const [year, month] = parseYM(ym)
+  return `${year}年${month}月`
+}
+
+function pickerValueOf(ym: string): string[] {
+  if (ym) {
+    const [year, month] = parseYM(ym)
+    return [String(year), String(month).padStart(2, '0')]
+  }
+  return [String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, '0')]
+}
+
+const rangeFromPickerValue = computed(() => pickerValueOf(refRangeFrom.value))
+const rangeToPickerValue = computed(() => pickerValueOf(refRangeTo.value))
+
+const refRangeHint = computed(() => {
+  if (refRangeFrom.value && refRangeTo.value) {
+    return `已按楼上 ${formatYM(refRangeFrom.value)} ~ ${formatYM(refRangeTo.value)} 差值计算（数值仍可手改）`
+  }
+  if (refRangeFrom.value) return '已选开始月，请继续选择结束月'
+  if (refRangeTo.value) return '已选结束月，请继续选择开始月'
+  return '选择楼上某年某月到某年某月，自动按「到月本次 − 从月上次」差值计算用量'
+})
+
+function onRangeFromConfirm(selected: { selectedValues: Array<string | number> }): void {
+  refRangeFrom.value = `${selected.selectedValues[0]}-${selected.selectedValues[1]}`
+  showRangeFromPicker.value = false
+  tryApplyRefRange()
+}
+
+function onRangeToConfirm(selected: { selectedValues: Array<string | number> }): void {
+  refRangeTo.value = `${selected.selectedValues[0]}-${selected.selectedValues[1]}`
+  showRangeToPicker.value = false
+  tryApplyRefRange()
+}
+
+/** 期间都选好后自动差值计算：楼上用量 = 到月本次读数 − 从月上次读数 */
+function tryApplyRefRange(): void {
+  if (!refRangeFrom.value || !refRangeTo.value) return
+  const [fromYear, fromMonth] = parseYM(refRangeFrom.value)
+  const [toYear, toMonth] = parseYM(refRangeTo.value)
+  if (fromYear * 12 + fromMonth > toYear * 12 + toMonth) {
+    showToast('结束月份不能早于开始月份')
+    return
+  }
+
+  const fromRecord = store.findLatestHouseRecord('upstairs', fromYear, fromMonth)
+  const toRecord = store.findLatestHouseRecord('upstairs', toYear, toMonth)
+  if (!fromRecord) {
+    showToast(`未找到楼上 ${formatYM(refRangeFrom.value)} 的记录`)
+    return
+  }
+  if (!toRecord) {
+    showToast(`未找到楼上 ${formatYM(refRangeTo.value)} 的记录`)
+    return
+  }
+
+  let missing = false
+  for (const meta of METER_META) {
+    const fromInfo = fromRecord.meters?.[meta.key]
+    const toInfo = toRecord.meters?.[meta.key]
+    if (fromInfo?.lastReading == null || toInfo?.currentReading == null) {
+      missing = true
+      continue
+    }
+    meters[meta.key].upstairsUsage = String(
+      Math.round((toInfo.currentReading - fromInfo.lastReading) * 1000) / 1000
+    )
+  }
+  showToast(missing ? '部分表缺少读数，未填的请手动输入' : '已按所选期间计算楼上用量')
+}
+
+function clearRefRange(): void {
+  refRangeFrom.value = ''
+  refRangeTo.value = ''
+  showToast('已清除期间选择')
+  syncUpstairsUsage()
+}
 
 /** 从本月「楼上」记录计算水/电/气用量（楼上本次 - 楼上上次），只读展示并参与楼下公式 */
 function syncUpstairsUsage(): void {
   if (!isDownstairs.value) return
+  // 已选择期间时，以上期间差值结果为准，不用本月数据覆盖
+  if (refRangeFrom.value && refRangeTo.value) return
   const upstairs = store.findLatestHouseRecord('upstairs', form.year, form.month)
   for (const meta of METER_META) {
     const info = upstairs?.meters?.[meta.key]
@@ -356,6 +464,15 @@ function buildDraft(): RecordDraft {
     draft.meters![meta.key] = meterInfo
   }
 
+  if (isDownstairs.value && refRangeFrom.value && refRangeTo.value) {
+    const [fromYear, fromMonth] = parseYM(refRangeFrom.value)
+    const [toYear, toMonth] = parseYM(refRangeTo.value)
+    if (fromYear * 12 + fromMonth <= toYear * 12 + toMonth) {
+      const refRange: RefRange = { fromYear, fromMonth, toYear, toMonth }
+      draft.refRange = refRange
+    }
+  }
+
   return draft
 }
 
@@ -472,6 +589,29 @@ async function onDelete(): Promise<void> {
           input-align="right"
         />
 
+        <!-- 楼下：楼上用量期间选择（差值计算） -->
+        <div v-if="isDownstairs" class="ref-range-box">
+          <div class="rr-title">⬆️ 楼上用量期间（可选）</div>
+          <div class="rr-row">
+            <button type="button" class="rr-btn" @click="showRangeFromPicker = true">
+              {{ refRangeFrom ? formatYM(refRangeFrom) : '开始月' }}
+            </button>
+            <span class="rr-sep">至</span>
+            <button type="button" class="rr-btn" @click="showRangeToPicker = true">
+              {{ refRangeTo ? formatYM(refRangeTo) : '结束月' }}
+            </button>
+            <button
+              v-if="refRangeFrom || refRangeTo"
+              type="button"
+              class="rr-clear"
+              @click="clearRefRange"
+            >
+              清除
+            </button>
+          </div>
+          <div class="rr-hint">{{ refRangeHint }}</div>
+        </div>
+
         <!-- 水 / 电 / 气：按读数计算 -->
         <div v-for="meta in METER_META" :key="meta.key" class="meter-block">
           <van-cell center :title="`${meta.emoji} ${meta.feeLabel}`">
@@ -512,16 +652,14 @@ async function onDelete(): Promise<void> {
               </template>
             </van-field>
 
-            <!-- 楼下：自动带出本月楼上读数（只读） -->
-            <div v-if="isDownstairs" class="ref-reading" :class="{ missing: meters[meta.key].upstairsUsage === '' }">
-              <template v-if="meters[meta.key].upstairsUsage !== ''">
-                ⬆️ 楼上本月用量：<b>{{ meters[meta.key].upstairsUsage }}</b>
-                <span class="ref-tip">（自动带出 = 楼上本次 - 楼上上次，楼下用量将扣除此用量）</span>
-              </template>
-              <template v-else>
-                ⚠️ 未找到楼上本月用量，请先保存「楼上」{{ form.year }}年{{ form.month }}月的抄表记录（需含本次/上次读数）
-              </template>
-            </div>
+            <van-field
+              v-if="isDownstairs"
+              v-model="meters[meta.key].upstairsUsage"
+              type="number"
+              :label="`⬆️ 楼上用量(${meta.unit})`"
+              placeholder="手动输入或按期间计算"
+              input-align="right"
+            />
 
             <div class="photo-row">
               <button type="button" class="photo-btn" @click="pickPhoto(meta.key)">
@@ -627,6 +765,31 @@ async function onDelete(): Promise<void> {
       />
     </van-popup>
 
+    <!-- 楼上用量期间：从月 / 到月 -->
+    <van-popup v-model:show="showRangeFromPicker" position="bottom" round>
+      <van-date-picker
+        :model-value="rangeFromPickerValue"
+        :columns-type="['year', 'month']"
+        title="选择开始月份"
+        :min-date="minDate"
+        :max-date="maxDate"
+        @confirm="onRangeFromConfirm"
+        @cancel="showRangeFromPicker = false"
+      />
+    </van-popup>
+
+    <van-popup v-model:show="showRangeToPicker" position="bottom" round>
+      <van-date-picker
+        :model-value="rangeToPickerValue"
+        :columns-type="['year', 'month']"
+        title="选择结束月份"
+        :min-date="minDate"
+        :max-date="maxDate"
+        @confirm="onRangeToConfirm"
+        @cancel="showRangeToPicker = false"
+      />
+    </van-popup>
+
     <input
       ref="fileInput"
       type="file"
@@ -715,6 +878,67 @@ async function onDelete(): Promise<void> {
 .meter-sub {
   font-size: 12px;
   color: var(--text-sub);
+}
+
+/* ===== 楼上用量期间选择 ===== */
+.ref-range-box {
+  margin: 10px 16px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #eef3ff;
+}
+
+.rr-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #4f7cff;
+}
+
+.rr-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.rr-btn {
+  flex: 1;
+  padding: 8px 0;
+  border: 1px solid #4f7cff;
+  border-radius: 8px;
+  background: #fff;
+  color: #4f7cff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.rr-btn:active {
+  opacity: 0.75;
+}
+
+.rr-sep {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: #4f7cff;
+}
+
+.rr-clear {
+  flex-shrink: 0;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #969799;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.rr-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(79, 124, 255, 0.85);
 }
 
 .refill-icon {

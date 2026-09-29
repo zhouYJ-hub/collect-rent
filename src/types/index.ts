@@ -1,3 +1,11 @@
+/** 楼下记录所选的「楼上用量计算期间」 */
+export interface RefRange {
+  fromYear: number
+  fromMonth: number
+  toYear: number
+  toMonth: number
+}
+
 /** 房屋类型（楼层） */
 export type HouseType = 'upstairs' | 'downstairs'
 
@@ -116,6 +124,8 @@ export interface RentRecord {
   deletedAt?: number
   /** 水电气抄表数据（读数/单价/照片） */
   meters?: Partial<Record<MeterKey, MeterInfo>>
+  /** 楼下记录：计算楼上用量所选的期间（分享时带该期间照片） */
+  refRange?: RefRange
 }
 
 export type FeeKey = 'rent' | 'water' | 'electricity' | 'gas' | 'garbage'

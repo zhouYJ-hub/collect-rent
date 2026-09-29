@@ -113,27 +113,38 @@ function buildPhotoGroups(record: RentRecord): BillPhotoGroup[] {
   const current: BillPhotoItem[] = []
   const previous: BillPhotoItem[] = []
 
-  function collect(source: RentRecord | undefined, target: BillPhotoItem[]): void {
+  function collect(source: RentRecord | undefined, target: BillPhotoItem[], tag = ''): void {
     if (!source) return
     for (const meta of METER_META) {
       const src = source.meters?.[meta.key]?.photo ?? ''
       if (!src || seen.has(src)) continue
       seen.add(src)
-      target.push({ caption: `${meta.emoji} ${meta.label}`, src })
+      const caption = tag ? `${meta.emoji} ${meta.label} · ${tag}` : `${meta.emoji} ${meta.label}`
+      target.push({ caption, src })
     }
   }
 
   collect(record, current)
   collect(store.findPrevHouseRecord(record.houseType ?? 'upstairs', record.year, record.month), previous)
 
-  // 楼下（总表）分享时，附带楼上本月的本次/上次照片
+  // 楼下（总表）分享时附带楼上照片：
+  // 选了期间 → 带所选「到月 / 从月」的楼上照片（截图标注年月）；
+  // 未选期间 → 默认带楼上本月与上次的照片
   if ((record.houseType ?? 'upstairs') === 'downstairs') {
-    const upstairs = store.findLatestHouseRecord('upstairs', record.year, record.month)
-    const upstairsPrev = upstairs
-      ? store.findPrevHouseRecord('upstairs', upstairs.year, upstairs.month)
-      : undefined
-    collect(upstairs, current)
-    collect(upstairsPrev, previous)
+    const range = record.refRange
+    if (range) {
+      const toRecord = store.findLatestHouseRecord('upstairs', range.toYear, range.toMonth)
+      const fromRecord = store.findLatestHouseRecord('upstairs', range.fromYear, range.fromMonth)
+      collect(toRecord, current, `${range.toYear}年${range.toMonth}月`)
+      collect(fromRecord, previous, `${range.fromYear}年${range.fromMonth}月`)
+    } else {
+      const upstairs = store.findLatestHouseRecord('upstairs', record.year, record.month)
+      const upstairsPrev = upstairs
+        ? store.findPrevHouseRecord('upstairs', upstairs.year, upstairs.month)
+        : undefined
+      collect(upstairs, current)
+      collect(upstairsPrev, previous)
+    }
   }
 
   const groups: BillPhotoGroup[] = []
