@@ -100,6 +100,10 @@ async function onSync(): Promise<void> {
           🔒 Token 只保存在你本机浏览器（localStorage），不会写进网页代码；
           数据文件存在你自己的私有仓库里，完全免费。
         </p>
+        <p class="guide-tip warn">
+          ⚠️ 同步报 404 的两个最常见原因：① 创建 Token 时没勾选 rent-data 仓库；
+          ② rent-data 是空仓库（没有 main 分支，去仓库页点 “Add a README file” 即可修复）。
+        </p>
       </section>
 
       <van-cell-group inset class="form-card">
@@ -113,7 +117,7 @@ async function onSync(): Promise<void> {
         <van-field
           v-model="form.repo"
           label="仓库名"
-          placeholder="如：rent-data（建议私有）"
+          placeholder="只填 rent-data，不带网址/.git"
           clearable
         />
         <van-field v-model="form.branch" label="分支" placeholder="main" clearable />
@@ -248,6 +252,12 @@ async function onSync(): Promise<void> {
   color: #389e0d;
   font-size: 12px;
   line-height: 1.7;
+}
+
+.guide-tip.warn {
+  margin-top: 8px;
+  background: #fff7e8;
+  color: #d48806;
 }
 
 .form-card {

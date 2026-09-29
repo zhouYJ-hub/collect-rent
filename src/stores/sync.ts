@@ -71,11 +71,17 @@ function isConfigValid(config: SyncConfig): boolean {
   )
 }
 
-function apiUrl(config: SyncConfig): string {
-  const path = config.path.trim().replace(/^\/+/, '')
+function repoApiBase(config: SyncConfig): string {
+  // 自动去掉误填的 .git 后缀（如 rent-data.git）
+  const repo = config.repo.trim().replace(/\.git$/i, '')
   return `https://api.github.com/repos/${encodeURIComponent(
     config.owner.trim()
-  )}/${encodeURIComponent(config.repo.trim())}/contents/${encodeURI(path)}`
+  )}/${encodeURIComponent(repo)}`
+}
+
+function apiUrl(config: SyncConfig): string {
+  const path = config.path.trim().replace(/^\/+/, '')
+  return `${repoApiBase(config)}/contents/${encodeURI(path)}`
 }
 
 function authHeaders(config: SyncConfig): Record<string, string> {
@@ -90,6 +96,37 @@ function authHeaders(config: SyncConfig): Record<string, string> {
 interface RemoteFile {
   sha: string | null
   content: string
+}
+
+/**
+ * 404 自动诊断：区分三种情况
+ * ① 仓库不存在 / Token 无权访问（GitHub 对无权仓库也返回 404）
+ * ② 分支不存在（空仓库没有 main 分支）
+ * ③ 文件路径不可写
+ */
+async function diagnose404(config: SyncConfig): Promise<string> {
+  const headers = authHeaders(config)
+  const repoRes = await fetch(repoApiBase(config), { headers, cache: 'no-store' })
+
+  if (repoRes.status === 404) {
+    return '404：仓库不存在或 Token 无权访问。请检查：① 用户名是否为 zhouYJ-hub（大小写一致）② 仓库名是否为 rent-data（不用带 .git 或网址）③ 创建 Token 时 Repository access 是否勾选了 rent-data'
+  }
+  if (repoRes.status === 401 || repoRes.status === 403) {
+    return 'Token 无效或权限不足（需勾选该仓库 Contents: Read and write）'
+  }
+  if (!repoRes.ok) {
+    return `无法访问仓库（HTTP ${repoRes.status}），请稍后重试`
+  }
+
+  const branchRes = await fetch(
+    `${repoApiBase(config)}/branches/${encodeURIComponent(config.branch.trim())}`,
+    { headers, cache: 'no-store' }
+  )
+  if (branchRes.status === 404) {
+    return `404：分支「${config.branch.trim() || 'main'}」不存在。rent-data 可能是空仓库（创建时没勾选 README）——请打开 rent-data 仓库页面点击 “Add a README file” 自动创建 main 分支，或把配置里的分支改成仓库实际分支`
+  }
+
+  return '404：云端文件路径不可写，请检查文件路径配置'
 }
 
 /** 拉取云端 JSON 文件；不存在时返回 null */
@@ -157,6 +194,9 @@ async function pushRemote(
   }
   if (res.status === 409) {
     throw new Error('云端刚被其他设备修改，请再同步一次合并后重试')
+  }
+  if (res.status === 404 || res.status === 422) {
+    throw new Error(await diagnose404(config))
   }
   if (!res.ok) {
     throw new Error(`上传云端数据失败（HTTP ${res.status}）`)
