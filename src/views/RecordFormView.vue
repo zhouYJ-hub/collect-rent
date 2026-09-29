@@ -139,10 +139,27 @@ function autoFillLastReadings(): void {
     const state = meters[meta.key]
     if (!state.enabled || state.lastReading.trim() !== '') continue
     const prev = store.findPrevMeter(form.tenant, form.houseType, form.year, form.month, meta.key)
-    if (prev?.currentReading != null) {
+    if (prev?.currentReading != null && prev.currentReading > 0) {
       state.lastReading = String(prev.currentReading)
     }
   }
+}
+
+/** 手动刷新：强制带出上次读数；无历史则清空并提示（不会带出 0） */
+function refillLastReading(key: MeterKey): void {
+  const label = METER_META.find((m) => m.key === key)?.label ?? ''
+  if (!form.tenant.trim()) {
+    showToast('请先填写租客姓名，才能带出上次读数')
+    return
+  }
+  const prev = store.findPrevMeter(form.tenant, form.houseType, form.year, form.month, key)
+  if (prev?.currentReading == null || prev.currentReading <= 0) {
+    meters[key].lastReading = ''
+    showToast(`${label}暂无历史读数，请手动输入`)
+    return
+  }
+  meters[key].lastReading = String(prev.currentReading)
+  showToast(`已带出上次读数 ${prev.currentReading}`)
 }
 
 watch(
@@ -483,9 +500,18 @@ async function onDelete(): Promise<void> {
               v-model="meters[meta.key].lastReading"
               type="number"
               label="上次读数"
-              placeholder="自动带出上次读数"
+              placeholder="点击↻带出或手动输入"
               input-align="right"
-            />
+            >
+              <template #right-icon>
+                <van-icon
+                  name="replay"
+                  class="refill-icon"
+                  title="带出上次读数"
+                  @click="refillLastReading(meta.key)"
+                />
+              </template>
+            </van-field>
 
             <!-- 楼下：自动带出本月楼上读数（只读） -->
             <div v-if="isDownstairs" class="ref-reading" :class="{ missing: meters[meta.key].upstairsUsage === '' }">
@@ -690,6 +716,17 @@ async function onDelete(): Promise<void> {
 .meter-sub {
   font-size: 12px;
   color: var(--text-sub);
+}
+
+.refill-icon {
+  padding: 4px;
+  color: var(--app-primary);
+  font-size: 17px;
+  cursor: pointer;
+}
+
+.refill-icon:active {
+  opacity: 0.6;
 }
 
 .ref-reading {
