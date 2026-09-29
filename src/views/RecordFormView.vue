@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { showConfirmDialog, showToast } from 'vant'
+import { showConfirmDialog, showImagePreview, showToast } from 'vant'
 
 import { useRentStore, type RecordDraft } from '@/stores/rent'
-import { FEE_META, type FeeKey } from '@/types'
+import { METER_META, type FeeKey, type MeterKey } from '@/types'
 import { formatYuan } from '@/utils/format'
+import { compressImage } from '@/utils/image'
+import { recognizeDigits } from '@/utils/ocr'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,6 +36,7 @@ function initAmount(value: number | undefined): string {
   return value && value > 0 ? String(value) : ''
 }
 
+/** 直接填金额模式（房租 / 垃圾费 / 未开启抄表的表） */
 const amountText = reactive<Record<FeeKey, string>>({
   rent: initAmount(existing.value?.rent),
   water: initAmount(existing.value?.water),
@@ -42,21 +45,185 @@ const amountText = reactive<Record<FeeKey, string>>({
   garbage: initAmount(existing.value?.garbage)
 })
 
+/* ===== 抄表模式（水/电/气） ===== */
+
+interface MeterFormState {
+  /** 是否按读数计算 */
+  enabled: boolean
+  lastReading: string
+  currentReading: string
+  unitPrice: string
+  photo: string
+  recognizing: boolean
+  hint: string
+}
+
+function emptyMeter(): MeterFormState {
+  return {
+    enabled: false,
+    lastReading: '',
+    currentReading: '',
+    unitPrice: '',
+    photo: '',
+    recognizing: false,
+    hint: ''
+  }
+}
+
+function initMeter(key: MeterKey): MeterFormState {
+  const info = existing.value?.meters?.[key]
+  if (!info || info.currentReading == null) return emptyMeter()
+  return {
+    enabled: true,
+    lastReading: info.lastReading != null ? String(info.lastReading) : '',
+    currentReading: String(info.currentReading),
+    unitPrice: info.unitPrice != null ? String(info.unitPrice) : '',
+    photo: info.photo ?? '',
+    recognizing: false,
+    hint: ''
+  }
+}
+
+const meters = reactive<Record<MeterKey, MeterFormState>>({
+  water: initMeter('water'),
+  electricity: initMeter('electricity'),
+  gas: initMeter('gas')
+})
+
+function toNumber(text: string): number | null {
+  if (text.trim() === '') return null
+  const value = Number(text)
+  return Number.isFinite(value) ? value : null
+}
+
+/** 按读数算出的费用；信息不全或本次<上次返回 null */
+function meterFeeOf(key: MeterKey): number | null {
+  const state = meters[key]
+  const last = toNumber(state.lastReading)
+  const current = toNumber(state.currentReading)
+  const price = toNumber(state.unitPrice)
+  if (last == null || current == null || price == null) return null
+  if (current < last) return null
+  return Math.round((current - last) * price * 100) / 100
+}
+
+/** 公式提示文本 */
+function formulaOf(key: MeterKey): string | null {
+  const state = meters[key]
+  const last = toNumber(state.lastReading)
+  const current = toNumber(state.currentReading)
+  const price = toNumber(state.unitPrice)
+  if (last == null || current == null || price == null) return null
+  return `(${trimNum(current)} - ${trimNum(last)}) × ${trimNum(price)}`
+}
+
+function trimNum(value: number): string {
+  return String(Math.round(value * 1000) / 1000)
+}
+
 function parseAmount(text: string): number {
   const value = Number(text)
   return Number.isFinite(value) && value > 0 ? value : 0
 }
 
-const total = computed(
-  () =>
-    parseAmount(amountText.rent) +
-    parseAmount(amountText.water) +
-    parseAmount(amountText.electricity) +
-    parseAmount(amountText.gas) +
-    parseAmount(amountText.garbage)
+/** 自动带出上一次读数和单价（同租客、本月之前最近一次） */
+function autoFillFromHistory(force = false): void {
+  if (!form.tenant.trim()) return
+  for (const meta of METER_META) {
+    const state = meters[meta.key]
+    if (!state.enabled) continue
+    if (!force && state.lastReading !== '' && state.unitPrice !== '') continue
+    const prev = store.findPrevMeter(form.tenant, form.year, form.month, meta.key)
+    if (!prev) continue
+    if (force || state.lastReading === '') {
+      state.lastReading = prev.currentReading != null ? String(prev.currentReading) : ''
+    }
+    if (state.unitPrice === '' && prev.unitPrice != null) {
+      state.unitPrice = String(prev.unitPrice)
+    }
+  }
+}
+
+watch(
+  [() => form.tenant, () => form.year, () => form.month],
+  () => autoFillFromHistory()
 )
 
-/* 年月选择器 */
+function onMeterToggle(key: MeterKey, value: boolean): void {
+  meters[key].enabled = value
+  if (value) autoFillFromHistory()
+}
+
+function refillHistory(key: MeterKey): void {
+  if (!form.tenant.trim()) {
+    showToast('请先填写租客姓名，才能带出历史读数')
+    return
+  }
+  const prev = store.findPrevMeter(form.tenant, form.year, form.month, key)
+  if (!prev || prev.currentReading == null) {
+    showToast(`${METER_META.find((m) => m.key === key)?.label ?? ''}暂无历史读数`)
+    return
+  }
+  meters[key].lastReading = String(prev.currentReading)
+  if (meters[key].unitPrice === '' && prev.unitPrice != null) {
+    meters[key].unitPrice = String(prev.unitPrice)
+  }
+  showToast(`已带出上次读数 ${prev.currentReading}`)
+}
+
+/* ===== 拍照识别 ===== */
+
+const fileInput = ref<HTMLInputElement | null>(null)
+const activeMeter = ref<MeterKey | null>(null)
+
+function pickPhoto(key: MeterKey): void {
+  activeMeter.value = key
+  fileInput.value?.click()
+}
+
+async function onPhotoChosen(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  const key = activeMeter.value
+  if (!file || !key) return
+
+  const state = meters[key]
+  try {
+    state.recognizing = true
+    state.hint = '照片处理中…'
+
+    const dataUrl = await compressImage(file)
+    state.photo = dataUrl
+
+    state.hint = '识别中…首次使用需下载识别模型，请稍候'
+    const digits = await recognizeDigits(dataUrl)
+
+    if (digits) {
+      state.currentReading = digits
+      state.hint = `识别为 ${digits}，请核对`
+    } else {
+      state.hint = '未识别到数字，请手动输入读数'
+    }
+  } catch {
+    state.hint = '识别失败，请手动输入读数'
+  } finally {
+    state.recognizing = false
+  }
+}
+
+function removePhoto(key: MeterKey): void {
+  meters[key].photo = ''
+  meters[key].hint = ''
+}
+
+function previewPhoto(key: MeterKey): void {
+  const photo = meters[key].photo
+  if (photo) showImagePreview([photo])
+}
+
+/* ===== 年月选择器 ===== */
+
 const showMonthPicker = ref(false)
 const minDate = new Date(2020, 0, 1)
 const maxDate = new Date(2035, 11, 1)
@@ -70,19 +237,55 @@ function onMonthConfirm(date: Date): void {
   showMonthPicker.value = false
 }
 
+/* ===== 合计与保存 ===== */
+
+const total = computed(() => {
+  let sum = parseAmount(amountText.rent) + parseAmount(amountText.garbage)
+  for (const meta of METER_META) {
+    sum += meters[meta.key].enabled
+      ? (meterFeeOf(meta.key) ?? 0)
+      : parseAmount(amountText[meta.feeKey])
+  }
+  return sum
+})
+
 function buildDraft(): RecordDraft {
-  return {
+  const draft: RecordDraft = {
     year: form.year,
     month: form.month,
     tenant: form.tenant,
     rent: parseAmount(amountText.rent),
-    water: parseAmount(amountText.water),
-    electricity: parseAmount(amountText.electricity),
-    gas: parseAmount(amountText.gas),
+    water: 0,
+    electricity: 0,
+    gas: 0,
     garbage: parseAmount(amountText.garbage),
     note: form.note,
-    paid: form.paid
+    paid: form.paid,
+    meters: {}
   }
+
+  for (const meta of METER_META) {
+    const state = meters[meta.key]
+    if (!state.enabled) {
+      draft[meta.feeKey] = parseAmount(amountText[meta.feeKey])
+      continue
+    }
+
+    const fee = meterFeeOf(meta.key)
+    if (fee == null) {
+      throw new Error(`请完整填写${meta.feeLabel}的读数和单价，或关闭「按读数计算」`)
+    }
+
+    draft[meta.feeKey] = fee
+    draft.meters![meta.key] = {
+      lastReading: toNumber(state.lastReading) ?? 0,
+      currentReading: toNumber(state.currentReading) ?? 0,
+      unitPrice: toNumber(state.unitPrice) ?? 0,
+      ...(state.photo ? { photo: state.photo } : {})
+    }
+  }
+
+  return draft
 }
 
 async function onSave(): Promise<void> {
@@ -91,7 +294,13 @@ async function onSave(): Promise<void> {
     return
   }
 
-  const draft = buildDraft()
+  let draft: RecordDraft
+  try {
+    draft = buildDraft()
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '请检查费用填写')
+    return
+  }
 
   const duplicate = store.findDuplicate(draft, editId.value || undefined)
   if (duplicate) {
@@ -165,13 +374,113 @@ async function onDelete(): Promise<void> {
 
       <van-cell-group inset class="form-card">
         <div class="card-title">费用明细（元）</div>
+
         <van-field
-          v-for="fee in FEE_META"
-          :key="fee.key"
-          v-model="amountText[fee.key]"
+          v-model="amountText.rent"
           type="number"
-          :label="`${fee.emoji} ${fee.label}`"
-          :placeholder="fee.key === 'rent' ? '如 2000' : '没有可留空'"
+          label="🏠 房租"
+          placeholder="如 2000"
+          input-align="right"
+        />
+
+        <!-- 水 / 电 / 气：支持抄表计算 + 拍照识别 -->
+        <div v-for="meta in METER_META" :key="meta.key" class="meter-block">
+          <van-cell center :title="`${meta.emoji} ${meta.feeLabel}`">
+            <template #label>
+              <span class="meter-sub">按读数计算（{{ meta.unit }}）</span>
+            </template>
+            <template #right-icon>
+              <van-switch
+                :model-value="meters[meta.key].enabled"
+                size="20px"
+                @update:model-value="(val: boolean) => onMeterToggle(meta.key, val)"
+              />
+            </template>
+          </van-cell>
+
+          <template v-if="meters[meta.key].enabled">
+            <van-field
+              v-model="meters[meta.key].lastReading"
+              type="number"
+              label="上次读数"
+              placeholder="自动带出，可修改"
+              input-align="right"
+            >
+              <template #right-icon>
+                <van-icon
+                  name="replay"
+                  class="refill-icon"
+                  title="从历史带出"
+                  @click="refillHistory(meta.key)"
+                />
+              </template>
+            </van-field>
+            <van-field
+              v-model="meters[meta.key].currentReading"
+              type="number"
+              label="本次读数"
+              placeholder="拍照识别或输入"
+              input-align="right"
+            />
+
+            <div class="photo-row">
+              <button
+                class="photo-btn"
+                :disabled="meters[meta.key].recognizing"
+                @click="pickPhoto(meta.key)"
+              >
+                <van-icon name="photograph" />
+                {{ meters[meta.key].photo ? '重新拍照' : '拍照识别' }}
+              </button>
+
+              <div v-if="meters[meta.key].photo" class="photo-preview">
+                <img
+                  :src="meters[meta.key].photo"
+                  alt="抄表照片"
+                  @click="previewPhoto(meta.key)"
+                />
+                <button class="photo-del" aria-label="删除照片" @click="removePhoto(meta.key)">
+                  <van-icon name="cross" />
+                </button>
+              </div>
+            </div>
+
+            <van-field
+              v-model="meters[meta.key].unitPrice"
+              type="number"
+              :label="`单价(元/${meta.unit})`"
+              :placeholder="meta.priceHint"
+              input-align="right"
+            />
+
+            <div v-if="meters[meta.key].hint" class="meter-hint" :class="{ ok: meters[meta.key].hint.startsWith('识别为') }">
+              {{ meters[meta.key].recognizing ? '⏳ ' : '' }}{{ meters[meta.key].hint }}
+            </div>
+
+            <div v-if="formulaOf(meta.key) !== null" class="meter-formula">
+              🧮 公式：{{ formulaOf(meta.key) }} =
+              <b>{{ formatYuan(meterFeeOf(meta.key) ?? 0) }}</b>
+              <span v-if="meterFeeOf(meta.key) === null" class="formula-warn">
+                （本次读数不能小于上次读数）
+              </span>
+            </div>
+          </template>
+
+          <van-field
+            v-else
+            v-model="amountText[meta.feeKey]"
+            type="number"
+            :label="`${meta.emoji} ${meta.feeLabel}`"
+            placeholder="直接填金额"
+            input-align="right"
+          />
+        </div>
+
+        <van-field
+          v-model="amountText.garbage"
+          type="number"
+          label="🧹 垃圾费"
+          placeholder="没有可留空"
           input-align="right"
         />
       </van-cell-group>
@@ -217,6 +526,14 @@ async function onDelete(): Promise<void> {
         @cancel="showMonthPicker = false"
       />
     </van-popup>
+
+    <input
+      ref="fileInput"
+      type="file"
+      accept="image/*"
+      class="hidden-input"
+      @change="onPhotoChosen"
+    />
   </div>
 </template>
 
@@ -241,6 +558,109 @@ async function onDelete(): Promise<void> {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-sub);
+}
+
+/* ===== 抄表区块 ===== */
+.meter-block {
+  border-top: 1px solid #f0f0f0;
+}
+
+.meter-block:first-of-type {
+  border-top: none;
+}
+
+.meter-sub {
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.refill-icon {
+  color: var(--app-primary);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.photo-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+}
+
+.photo-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 14px;
+  border: 1px dashed var(--app-primary);
+  border-radius: 8px;
+  background: #e8f8f1;
+  color: var(--app-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.photo-btn:disabled {
+  opacity: 0.55;
+}
+
+.photo-preview {
+  position: relative;
+}
+
+.photo-preview img {
+  display: block;
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  cursor: zoom-in;
+}
+
+.photo-del {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.meter-hint {
+  padding: 0 16px 8px;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.meter-hint.ok {
+  color: var(--app-primary);
+}
+
+.meter-formula {
+  margin: 0 16px 12px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: #f6ffed;
+  color: #389e0d;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.meter-formula b {
+  font-variant-numeric: tabular-nums;
+}
+
+.formula-warn {
+  color: #d48806;
 }
 
 .delete-link {
@@ -286,5 +706,9 @@ async function onDelete(): Promise<void> {
 .save-btn {
   min-width: 132px;
   font-weight: 700;
+}
+
+.hidden-input {
+  display: none;
 }
 </style>

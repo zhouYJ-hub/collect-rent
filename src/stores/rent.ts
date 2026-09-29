@@ -1,7 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 
-import type { FeeKey, RentRecord } from '@/types'
+import type { FeeKey, MeterInfo, MeterKey, RentRecord } from '@/types'
 import { recordTotal } from '@/types'
 import { genId } from '@/utils/id'
 
@@ -19,6 +19,7 @@ export interface RecordDraft {
   garbage: number
   note: string
   paid: boolean
+  meters?: Partial<Record<MeterKey, MeterInfo>>
 }
 
 export interface PeriodSummary {
@@ -91,6 +92,26 @@ export const useRentStore = defineStore('rent', () => {
 
   function recordsOfMonth(year: number, month: number): RentRecord[] {
     return sortedRecords.value.filter((r) => r.year === year && r.month === month)
+  }
+
+  /**
+   * 查询某租客指定月份之前、最近一次的抄表数据。
+   * 用于自动带出「上次读数」和「单价」。
+   */
+  function findPrevMeter(
+    tenant: string,
+    year: number,
+    month: number,
+    meter: MeterKey
+  ): MeterInfo | undefined {
+    const name = tenant.trim()
+    return sortedRecords.value.find(
+      (r) =>
+        !r.deleted &&
+        r.tenant.trim() === name &&
+        (r.year < year || (r.year === year && r.month < month)) &&
+        r.meters?.[meter]?.currentReading != null
+    )?.meters?.[meter]
   }
 
   function findById(id: string): RentRecord | undefined {
@@ -205,6 +226,7 @@ export const useRentStore = defineStore('rent', () => {
     records,
     sortedRecords,
     recordsOfMonth,
+    findPrevMeter,
     findById,
     findDuplicate,
     saveRecord,

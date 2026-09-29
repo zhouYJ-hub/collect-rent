@@ -1,4 +1,4 @@
-import { FEE_META, recordTotal, type RentRecord } from '@/types'
+import { FEE_META, meterFormulaText, meterInfoOf, recordTotal, type RentRecord } from '@/types'
 import { formatYuan } from '@/utils/format'
 
 /** 生成发给租客的文字账单 */
@@ -16,7 +16,13 @@ export function buildBillText(record: RentRecord): string {
 
   if (visible.length > 0) {
     for (const fee of visible) {
-      lines.push(`${fee.emoji} ${fee.label}：${formatYuan(fee.value)}`)
+      const meter = meterInfoOf(record, fee.key)
+      const formula = meter ? meterFormulaText(meter) : ''
+      lines.push(
+        formula
+          ? `${fee.emoji} ${fee.label}：${formatYuan(fee.value)}（${formula}）`
+          : `${fee.emoji} ${fee.label}：${formatYuan(fee.value)}`
+      )
     }
   } else {
     lines.push('（本月暂无费用明细）')
