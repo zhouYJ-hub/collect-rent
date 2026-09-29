@@ -235,12 +235,12 @@ export async function renderBillImage(
 ): Promise<Blob> {
   const data = buildBillData(record)
 
-  // 预加载全部照片
+  // 预加载全部照片（空地址 = 缺图占位，跳过加载）
   const loadedImages = new Map<string, HTMLImageElement>()
   await Promise.all(
     photoGroups.flatMap((group) =>
       group.photos.map(async (item) => {
-        if (!loadedImages.has(item.src)) {
+        if (item.src && !loadedImages.has(item.src)) {
           loadedImages.set(item.src, await loadImage(item.src))
         }
       })
