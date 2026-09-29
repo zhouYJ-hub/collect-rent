@@ -14,7 +14,7 @@ import {
   type RentRecord
 } from '@/types'
 import { buildBillText } from '@/utils/bill'
-import { renderBillImage, type BillPhotoGroup } from '@/utils/billImage'
+import { renderBillImage, type BillPhotoGroup, type BillPhotoItem } from '@/utils/billImage'
 import { copyImage, copyText } from '@/utils/clipboard'
 import { formatYuan } from '@/utils/format'
 import { blobToDataURL } from '@/utils/image'
@@ -107,46 +107,38 @@ watch(showSharePopup, (visible) => {
   shareBlob.value = null
 })
 
-/** 组装抄表照片：楼上=本次+上次；楼下=楼下本次/上次 + 楼上本次/上次 */
+/** 组装抄表照片（截图不含楼上/楼下文案）：合并为「本次 / 上次」两组 */
 function buildPhotoGroups(record: RentRecord): BillPhotoGroup[] {
-  const groups: BillPhotoGroup[] = []
   const seen = new Set<string>()
+  const current: BillPhotoItem[] = []
+  const previous: BillPhotoItem[] = []
 
-  function collect(
-    source: RentRecord | undefined,
-    tag: '本次' | '上次',
-    title: string
-  ): void {
+  function collect(source: RentRecord | undefined, target: BillPhotoItem[]): void {
     if (!source) return
-    const photos = METER_META.map((meta) => ({
-      caption: `${meta.emoji} ${meta.label} · ${tag}`,
-      src: source.meters?.[meta.key]?.photo ?? ''
-    })).filter((item) => {
-      if (!item.src || seen.has(item.src)) return false
-      seen.add(item.src)
-      return true
-    })
-    if (photos.length > 0) {
-      groups.push({ title, photos })
+    for (const meta of METER_META) {
+      const src = source.meters?.[meta.key]?.photo ?? ''
+      if (!src || seen.has(src)) continue
+      seen.add(src)
+      target.push({ caption: `${meta.emoji} ${meta.label}`, src })
     }
   }
 
-  const houseType = record.houseType ?? 'upstairs'
-  const prev = store.findPrevHouseRecord(houseType, record.year, record.month)
-  if (houseType === 'upstairs') {
-    collect(record, '本次', '⬆️ 楼上抄表照片')
-    collect(prev, '上次', '⬆️ 楼上抄表照片（上次）')
-  } else {
-    collect(record, '本次', '⬇️ 楼下抄表照片')
-    collect(prev, '上次', '⬇️ 楼下抄表照片（上次）')
+  collect(record, current)
+  collect(store.findPrevHouseRecord(record.houseType ?? 'upstairs', record.year, record.month), previous)
+
+  // 楼下（总表）分享时，附带楼上本月的本次/上次照片
+  if ((record.houseType ?? 'upstairs') === 'downstairs') {
     const upstairs = store.findLatestHouseRecord('upstairs', record.year, record.month)
     const upstairsPrev = upstairs
       ? store.findPrevHouseRecord('upstairs', upstairs.year, upstairs.month)
       : undefined
-    collect(upstairs, '本次', '⬆️ 楼上抄表照片')
-    collect(upstairsPrev, '上次', '⬆️ 楼上抄表照片（上次）')
+    collect(upstairs, current)
+    collect(upstairsPrev, previous)
   }
 
+  const groups: BillPhotoGroup[] = []
+  if (current.length > 0) groups.push({ title: '本次抄表照片', photos: current })
+  if (previous.length > 0) groups.push({ title: '上次抄表照片', photos: previous })
   return groups
 }
 

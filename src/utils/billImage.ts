@@ -1,7 +1,6 @@
 import {
   FEE_META,
   calcMeterUsage,
-  houseTypeMeta,
   meterFormulaText,
   meterInfoOf,
   recordTotal,
@@ -25,6 +24,19 @@ export interface BillData {
   total: string
   paid: boolean
   note: string
+}
+
+/** 抄表照片项 */
+export interface BillPhotoItem {
+  /** 如：💧 水表 */
+  caption: string
+  src: string
+}
+
+/** 抄表照片分组 */
+export interface BillPhotoGroup {
+  title: string
+  photos: BillPhotoItem[]
 }
 
 const METER_UNIT: Record<string, string> = {
@@ -52,10 +64,9 @@ export function buildBillData(record: RentRecord): BillData {
     }
   )
 
-  const type = houseTypeMeta(record.houseType)
   return {
     title: `${record.year}年${record.month}月 房租账单`,
-    tenantLine: `租客：${record.tenant}${type ? `（${type.label}）` : ''}`,
+    tenantLine: `租客：${record.tenant}`,
     fees,
     total: formatYuan(recordTotal(record)),
     paid: record.paid,
@@ -68,7 +79,8 @@ export function buildBillData(record: RentRecord): BillData {
 const SCALE = 2
 const W = 600
 
-const FONT_STACK = '-apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif'
+const FONT_STACK =
+  '-apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif'
 const F_TITLE = `700 30px ${FONT_STACK}`
 const F_SUB = `400 22px ${FONT_STACK}`
 const F_LABEL = `500 26px ${FONT_STACK}`
@@ -79,6 +91,15 @@ const F_TOTAL = `800 38px ${FONT_STACK}`
 const F_NOTE = `400 22px ${FONT_STACK}`
 const F_FOOTER = `400 20px ${FONT_STACK}`
 const F_BADGE = `600 22px ${FONT_STACK}`
+
+/* 照片区尺寸（所有间距常量集中管理，绘制与高度计算共用） */
+const PHOTO_CAPTION_H = 24
+const PHOTO_CELL_H = 185
+const PHOTO_ROW_GAP = 16
+const PHOTO_ROW_H = PHOTO_CAPTION_H + PHOTO_CELL_H + PHOTO_ROW_GAP // 225
+const PHOTO_GROUP_TITLE_H = 44
+const PHOTOS_HEADER_H = 48
+const PHOTOS_DIVIDER_H = 30
 
 function roundRect(
   ctx: CanvasRenderingContext2D,
@@ -136,21 +157,6 @@ function dashedLine(
   ctx.restore()
 }
 
-/** 抄表照片项 */
-export interface BillPhotoItem {
-  /** 如：💧 水表 · 本次 */
-  caption: string
-  /** 图片 dataURL */
-  src: string
-}
-
-/** 抄表照片分组 */
-export interface BillPhotoGroup {
-  /** 如：⬆️ 楼上抄表照片 */
-  title: string
-  photos: BillPhotoItem[]
-}
-
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image()
@@ -160,7 +166,6 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   })
 }
 
-/** 按封面模式把图片绘制进圆角单元格 */
 function drawImageCover(
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement,
@@ -187,18 +192,13 @@ function drawImageCover(
   ctx.restore()
 }
 
-const PHOTO_CELL_H = 185
-const PHOTO_GAP = 14
-
-/** 计算照片区高度（不含分割线） */
 function photosSectionHeight(groups: BillPhotoGroup[]): number {
   if (groups.length === 0) return 0
-  let h = 44 // 「抄表照片」标题
+  let h = PHOTOS_DIVIDER_H + PHOTOS_HEADER_H
   for (const group of groups) {
-    const rows = Math.ceil(group.photos.length / 2)
-    h += 40 + rows * (24 + PHOTO_CELL_H + 16)
+    h += PHOTO_GROUP_TITLE_H + Math.ceil(group.photos.length / 2) * PHOTO_ROW_H
   }
-  return h + 30 // 分割线区域
+  return h
 }
 
 /** 把账单绘制成 PNG 截图（纯前端，无网络依赖），可附带抄表照片 */
@@ -211,8 +211,8 @@ export async function renderBillImage(
   // 预加载全部照片
   const loadedImages = new Map<string, HTMLImageElement>()
   await Promise.all(
-    photoGroups.flatMap((g) =>
-      g.photos.map(async (item) => {
+    photoGroups.flatMap((group) =>
+      group.photos.map(async (item) => {
         if (!loadedImages.has(item.src)) {
           loadedImages.set(item.src, await loadImage(item.src))
         }
@@ -227,34 +227,25 @@ export async function renderBillImage(
   const CARD_X = 16
   const CARD_W = W - 32
   const P = 30
+  const CELL_W = Math.floor((CARD_W - P * 2 - 14) / 2)
+
   const HEADER_H = 118
+  const FEES_TOP_GAP = 30
+  const TOTAL_SECTION_H = 92
 
   const noteLines = data.note ? wrapText(mctx, data.note, CARD_W - P * 2 - 24, F_NOTE) : []
   const hasNote = noteLines.length > 0
+  const noteBoxH = hasNote ? 20 + noteLines.length * 34 + 16 : 0
+  const noteH = hasNote ? noteBoxH + 20 : 0
 
-  const feeRowH = (fee: BillFeeLine) => (fee.detail ? 96 : 62)
   const feesH = data.fees.length
-    ? data.fees.reduce((sum, fee) => sum + feeRowH(fee), 0)
+    ? data.fees.reduce((sum, fee) => sum + (fee.detail ? 96 : 62), 0)
     : 52
 
-  const TOTAL_H = 78
+  const photosH = photosSectionHeight(photoGroups)
   const FOOTER_H = 66
-  const NOTE_H = hasNote ? 24 + noteLines.length * 34 + 24 : 0
-  const CELL_W = Math.floor((CARD_W - P * 2 - PHOTO_GAP) / 2)
-  const PHOTOS_H = photosSectionHeight(photoGroups)
-
   const H =
-    16 +
-    HEADER_H +
-    26 +
-    feesH +
-    18 +
-    TOTAL_H +
-    20 +
-    NOTE_H +
-    PHOTOS_H +
-    FOOTER_H +
-    16
+    16 + HEADER_H + FEES_TOP_GAP + feesH + TOTAL_SECTION_H + noteH + photosH + FOOTER_H
 
   const canvas = document.createElement('canvas')
   canvas.width = W * SCALE
@@ -300,111 +291,107 @@ export async function renderBillImage(
   ctx.textAlign = 'center'
   ctx.fillText(badgeText, CARD_X + CARD_W - P - badgeW / 2, 16 + 34 + 27)
 
-  // 费用明细
-  let y = 16 + HEADER_H + 26 + 34
+  // ===== 费用明细 =====
+  let y = 16 + HEADER_H + FEES_TOP_GAP
   if (data.fees.length === 0) {
     ctx.fillStyle = '#969799'
     ctx.font = F_DETAIL
     ctx.textAlign = 'left'
-    ctx.fillText('（本月暂无费用明细）', CARD_X + P, y)
-    y += 24
+    ctx.fillText('（本月暂无费用明细）', CARD_X + P, y + 30)
   } else {
     for (const fee of data.fees) {
       ctx.fillStyle = '#323233'
       ctx.font = F_LABEL
       ctx.textAlign = 'left'
-      ctx.fillText(`${fee.emoji} ${fee.label}`, CARD_X + P, y)
+      ctx.fillText(`${fee.emoji} ${fee.label}`, CARD_X + P, y + 34)
 
       ctx.fillStyle = '#323233'
       ctx.font = F_AMOUNT
       ctx.textAlign = 'right'
-      ctx.fillText(fee.amount, CARD_X + CARD_W - P, y)
+      ctx.fillText(fee.amount, CARD_X + CARD_W - P, y + 34)
 
       if (fee.detail) {
         ctx.fillStyle = '#969799'
         ctx.font = F_DETAIL
         ctx.textAlign = 'left'
-        ctx.fillText(fee.detail, CARD_X + P, y + 34)
-        y += feeRowH(fee)
-      } else {
-        y += feeRowH(fee)
+        ctx.fillText(fee.detail, CARD_X + P, y + 68)
       }
+      y += fee.detail ? 96 : 62
     }
   }
 
-  // 分割线 + 合计
-  dashedLine(ctx, CARD_X + P, y + 6, CARD_X + CARD_W - P, '#e5e7eb')
-  y += 6 + TOTAL_H - 18
+  // ===== 合计 =====
+  dashedLine(ctx, CARD_X + P, y + 12, CARD_X + CARD_W - P, '#e5e7eb')
+  const totalBaseline = y + 12 + 26 + 40
   ctx.fillStyle = '#969799'
   ctx.font = F_TOTAL_LABEL
   ctx.textAlign = 'left'
-  ctx.fillText('合计', CARD_X + P, y)
+  ctx.fillText('合计', CARD_X + P, totalBaseline)
   ctx.fillStyle = '#0ba360'
   ctx.font = F_TOTAL
   ctx.textAlign = 'right'
-  ctx.fillText(data.total, CARD_X + CARD_W - P, y)
-  y += 20
+  ctx.fillText(data.total, CARD_X + CARD_W - P, totalBaseline)
+  y += TOTAL_SECTION_H
 
-  // 备注
+  // ===== 备注 =====
   if (hasNote) {
-    const boxH = 24 + noteLines.length * 34 + 16
-    roundRect(ctx, CARD_X + P - 8, y, CARD_W - (P - 8) * 2, boxH, 12)
+    roundRect(ctx, CARD_X + P - 8, y, CARD_W - (P - 8) * 2, noteBoxH, 12)
     ctx.fillStyle = '#f7f8fa'
     ctx.fill()
     ctx.fillStyle = '#6b7280'
     ctx.font = F_NOTE
     ctx.textAlign = 'left'
-    let ny = y + 24 + 22
+    let ny = y + 20 + 24
     for (const line of noteLines) {
       ctx.fillText(line, CARD_X + P + 4, ny)
       ny += 34
     }
-    y += boxH + 20
+    y += noteH
   }
 
-  // 抄表照片区
+  // ===== 抄表照片 =====
   if (photoGroups.length > 0) {
-    dashedLine(ctx, CARD_X + P, y + 4, CARD_X + CARD_W - P, '#e5e7eb')
-    y += 34
+    dashedLine(ctx, CARD_X + P, y + 8, CARD_X + CARD_W - P, '#e5e7eb')
+    y += PHOTOS_DIVIDER_H
+
     ctx.fillStyle = '#323233'
     ctx.font = F_LABEL
     ctx.textAlign = 'left'
-    ctx.fillText('📷 抄表照片', CARD_X + P, y)
-    y += 44
+    ctx.fillText('📷 抄表照片', CARD_X + P, y + 30)
+    y += PHOTOS_HEADER_H
 
     for (const group of photoGroups) {
-      ctx.fillStyle = '#4f7cff'
+      ctx.fillStyle = '#969799'
       ctx.font = F_DETAIL
       ctx.textAlign = 'left'
-      ctx.fillText(group.title, CARD_X + P, y)
-      y += 30
+      ctx.fillText(group.title, CARD_X + P, y + 26)
+      y += PHOTO_GROUP_TITLE_H
 
       for (let i = 0; i < group.photos.length; i += 2) {
         const rowItems = group.photos.slice(i, i + 2)
         for (let c = 0; c < rowItems.length; c++) {
           const item = rowItems[c]!
-          const x = CARD_X + P + c * (CELL_W + PHOTO_GAP)
+          const x = CARD_X + P + c * (CELL_W + 14)
           ctx.fillStyle = '#969799'
           ctx.font = F_DETAIL
           ctx.textAlign = 'left'
           ctx.fillText(item.caption, x, y + 18)
           const img = loadedImages.get(item.src)
           if (img) {
-            drawImageCover(ctx, img, x, y + 26, CELL_W, PHOTO_CELL_H)
+            drawImageCover(ctx, img, x, y + PHOTO_CAPTION_H, CELL_W, PHOTO_CELL_H)
           }
         }
-        y += 24 + PHOTO_CELL_H + 16
+        y += PHOTO_ROW_H
       }
-      y += 0
     }
   }
 
-  // 页脚
+  // ===== 页脚 =====
   ctx.fillStyle = '#b7bdc8'
   ctx.font = F_FOOTER
   ctx.textAlign = 'center'
   const date = new Date().toLocaleString('zh-CN', { hour12: false })
-  ctx.fillText(`由「收房租」生成 · ${date}`, W / 2, H - 16 - 24)
+  ctx.fillText(`由「收房租」生成 · ${date}`, W / 2, H - 26)
 
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
