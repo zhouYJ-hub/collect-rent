@@ -92,11 +92,13 @@ const F_NOTE = `400 22px ${FONT_STACK}`
 const F_FOOTER = `400 20px ${FONT_STACK}`
 const F_BADGE = `600 22px ${FONT_STACK}`
 
-/* 照片区尺寸（所有间距常量集中管理，绘制与高度计算共用） */
+/* 照片区尺寸：固定 水/电/气 三列，缺图显示「暂无」占位 */
+const PHOTO_COLS = 3
+const PHOTO_COL_GAP = 14
 const PHOTO_CAPTION_H = 24
-const PHOTO_CELL_H = 185
+const PHOTO_CELL_H = 120
 const PHOTO_ROW_GAP = 16
-const PHOTO_ROW_H = PHOTO_CAPTION_H + PHOTO_CELL_H + PHOTO_ROW_GAP // 225
+const PHOTO_ROW_H = PHOTO_CAPTION_H + PHOTO_CELL_H + PHOTO_ROW_GAP // 160
 const PHOTO_GROUP_TITLE_H = 44
 const PHOTOS_HEADER_H = 48
 const PHOTOS_DIVIDER_H = 30
@@ -192,13 +194,38 @@ function drawImageCover(
   ctx.restore()
 }
 
+/** 计算照片区高度（每组固定三列，一排展示） */
 function photosSectionHeight(groups: BillPhotoGroup[]): number {
   if (groups.length === 0) return 0
   let h = PHOTOS_DIVIDER_H + PHOTOS_HEADER_H
   for (const group of groups) {
-    h += PHOTO_GROUP_TITLE_H + Math.ceil(group.photos.length / 2) * PHOTO_ROW_H
+    h += PHOTO_GROUP_TITLE_H + Math.ceil(group.photos.length / PHOTO_COLS) * PHOTO_ROW_H
   }
   return h
+}
+
+/** 缺失照片的「暂无」占位框 */
+function drawPhotoPlaceholder(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+): void {
+  ctx.save()
+  roundRect(ctx, x, y, w, h, 10)
+  ctx.fillStyle = '#f5f6f8'
+  ctx.fill()
+  ctx.setLineDash([4, 4])
+  ctx.strokeStyle = '#d9dce1'
+  ctx.lineWidth = 1
+  ctx.stroke()
+  ctx.restore()
+
+  ctx.fillStyle = '#c0c4cc'
+  ctx.font = F_DETAIL
+  ctx.textAlign = 'center'
+  ctx.fillText('暂无', x + w / 2, y + h / 2 + 7)
 }
 
 /** 把账单绘制成 PNG 截图（纯前端，无网络依赖），可附带抄表照片 */
@@ -227,7 +254,7 @@ export async function renderBillImage(
   const CARD_X = 16
   const CARD_W = W - 32
   const P = 30
-  const CELL_W = Math.floor((CARD_W - P * 2 - 14) / 2)
+  const CELL_W = Math.floor((CARD_W - P * 2 - PHOTO_COL_GAP * (PHOTO_COLS - 1)) / PHOTO_COLS)
 
   const HEADER_H = 118
   const FEES_TOP_GAP = 30
@@ -367,22 +394,22 @@ export async function renderBillImage(
       ctx.fillText(group.title, CARD_X + P, y + 26)
       y += PHOTO_GROUP_TITLE_H
 
-      for (let i = 0; i < group.photos.length; i += 2) {
-        const rowItems = group.photos.slice(i, i + 2)
-        for (let c = 0; c < rowItems.length; c++) {
-          const item = rowItems[c]!
-          const x = CARD_X + P + c * (CELL_W + 14)
-          ctx.fillStyle = '#969799'
-          ctx.font = F_DETAIL
-          ctx.textAlign = 'left'
-          ctx.fillText(item.caption, x, y + 18)
-          const img = loadedImages.get(item.src)
-          if (img) {
-            drawImageCover(ctx, img, x, y + PHOTO_CAPTION_H, CELL_W, PHOTO_CELL_H)
-          }
+      // 每组固定三列（水/电/气），缺图用「暂无」占位，位置永不错乱
+      for (let c = 0; c < group.photos.length && c < PHOTO_COLS; c++) {
+        const item = group.photos[c]!
+        const x = CARD_X + P + c * (CELL_W + PHOTO_COL_GAP)
+        ctx.fillStyle = '#969799'
+        ctx.font = F_DETAIL
+        ctx.textAlign = 'left'
+        ctx.fillText(item.caption, x, y + 18)
+        const img = item.src ? loadedImages.get(item.src) : undefined
+        if (img) {
+          drawImageCover(ctx, img, x, y + PHOTO_CAPTION_H, CELL_W, PHOTO_CELL_H)
+        } else {
+          drawPhotoPlaceholder(ctx, x, y + PHOTO_CAPTION_H, CELL_W, PHOTO_CELL_H)
         }
-        y += PHOTO_ROW_H
       }
+      y += PHOTO_ROW_H
     }
   }
 

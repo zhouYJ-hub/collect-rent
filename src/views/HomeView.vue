@@ -107,38 +107,35 @@ watch(showSharePopup, (visible) => {
   shareBlob.value = null
 })
 
+/** 固定三格（水/电/气），缺照片 → 空串，截图里显示「暂无」占位 */
+function collectFixed(source: RentRecord | undefined): BillPhotoItem[] {
+  return METER_META.map((meta) => ({
+    caption: `${meta.emoji} ${meta.label}`,
+    src: source?.meters?.[meta.key]?.photo ?? ''
+  }))
+}
+
 /** 组装抄表照片：
  *  - 楼上分享：本次 / 上次 两组
- *  - 楼下分享：自己本次 / 自己上次 / 楼上起始月 / 楼上截止月 四组 */
+ *  - 楼下分享：自己本次 / 自己上次 / 楼上起始月 / 楼上截止月 四组
+ *  每组固定 水/电/气 三个位置，顺序一致，数据不会错位 */
 function buildPhotoGroups(record: RentRecord): BillPhotoGroup[] {
-  const seen = new Set<string>()
-  const current: BillPhotoItem[] = []
-  const previous: BillPhotoItem[] = []
-  const fromPhotos: BillPhotoItem[] = []
-  const toPhotos: BillPhotoItem[] = []
-
-  function collect(source: RentRecord | undefined, target: BillPhotoItem[]): void {
-    if (!source) return
-    for (const meta of METER_META) {
-      const src = source.meters?.[meta.key]?.photo ?? ''
-      if (!src || seen.has(src)) continue
-      seen.add(src)
-      target.push({ caption: `${meta.emoji} ${meta.label}`, src })
-    }
-  }
-
   // ① 自己本次 ② 自己上次
-  collect(record, current)
-  collect(store.findPrevHouseRecord(record.houseType ?? 'upstairs', record.year, record.month), previous)
+  const prevRecord = store.findPrevHouseRecord(
+    record.houseType ?? 'upstairs',
+    record.year,
+    record.month
+  )
 
   const isDownstairs = (record.houseType ?? 'upstairs') === 'downstairs'
+  let fromRecord: RentRecord | undefined
+  let toRecord: RentRecord | undefined
   let fromLabel = ''
   let toLabel = ''
+
   if (isDownstairs) {
     // ③ 楼上起始月 ④ 楼上截止月（选了期间用所选月份，否则默认楼上本月 + 上次）
     const range = record.refRange
-    let fromRecord: RentRecord | undefined
-    let toRecord: RentRecord | undefined
     if (range) {
       fromRecord = store.findLatestHouseRecord('upstairs', range.fromYear, range.fromMonth)
       toRecord = store.findLatestHouseRecord('upstairs', range.toYear, range.toMonth)
@@ -152,18 +149,21 @@ function buildPhotoGroups(record: RentRecord): BillPhotoGroup[] {
       fromLabel = fromRecord ? `${fromRecord.year}年${fromRecord.month}月` : ''
       toLabel = toRecord ? `${toRecord.year}年${toRecord.month}月` : ''
     }
-    collect(fromRecord, fromPhotos)
-    collect(toRecord, toPhotos)
   }
 
-  const groups: BillPhotoGroup[] = []
-  if (current.length > 0) groups.push({ title: '本次抄表照片', photos: current })
-  if (previous.length > 0) groups.push({ title: '上次抄表照片', photos: previous })
-  if (fromPhotos.length > 0) {
-    groups.push({ title: `楼上起始月照片${fromLabel ? `（${fromLabel}）` : ''}`, photos: fromPhotos })
-  }
-  if (toPhotos.length > 0) {
-    groups.push({ title: `楼上截止月照片${toLabel ? `（${toLabel}）` : ''}`, photos: toPhotos })
+  const groups: BillPhotoGroup[] = [
+    { title: '本次抄表照片', photos: collectFixed(record) },
+    { title: '上次抄表照片', photos: collectFixed(prevRecord) }
+  ]
+  if (isDownstairs) {
+    groups.push({
+      title: `楼上起始月照片${fromLabel ? `（${fromLabel}）` : ''}`,
+      photos: collectFixed(fromRecord)
+    })
+    groups.push({
+      title: `楼上截止月照片${toLabel ? `（${toLabel}）` : ''}`,
+      photos: collectFixed(toRecord)
+    })
   }
   return groups
 }
