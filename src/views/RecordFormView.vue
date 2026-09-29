@@ -75,7 +75,7 @@ interface MeterFormState {
   /** 抄表照片（仅存档） */
   photo: string
   /** 楼上本月读数（仅楼下使用，自动从本月楼上记录带出） */
-  upstairsReading: string
+  upstairsUsage: string
 }
 
 function emptyMeter(key: MeterKey): MeterFormState {
@@ -85,7 +85,7 @@ function emptyMeter(key: MeterKey): MeterFormState {
     currentReading: '',
     unitPrice: String(defaultPrice(key, form.houseType)),
     photo: '',
-    upstairsReading: ''
+    upstairsUsage: ''
   }
 }
 
@@ -98,7 +98,7 @@ function initMeter(key: MeterKey): MeterFormState {
     currentReading: String(info.currentReading),
     unitPrice: info.unitPrice != null ? String(info.unitPrice) : String(defaultPrice(key, form.houseType)),
     photo: info.photo ?? '',
-    upstairsReading: info.refReading != null ? String(info.refReading) : ''
+    upstairsUsage: info.refUsage != null ? String(info.refUsage) : ''
   }
 }
 
@@ -118,21 +118,46 @@ function toNumber(text: string): number | null {
 
 const isDownstairs = computed(() => form.houseType === 'downstairs')
 
-/** 从本月「楼上」记录带出水/电/气本次读数（只读展示并参与公式） */
-function syncUpstairsReadings(): void {
+/** 从本月「楼上」记录计算水/电/气用量（楼上本次 - 楼上上次），只读展示并参与楼下公式 */
+function syncUpstairsUsage(): void {
   if (!isDownstairs.value) return
   const upstairs = store.findLatestHouseRecord('upstairs', form.year, form.month)
   for (const meta of METER_META) {
-    meters[meta.key].upstairsReading =
-      upstairs?.meters?.[meta.key]?.currentReading != null
-        ? String(upstairs.meters![meta.key]!.currentReading)
+    const info = upstairs?.meters?.[meta.key]
+    meters[meta.key].upstairsUsage =
+      info?.currentReading != null && info?.lastReading != null
+        ? String(Math.round((info.currentReading - info.lastReading) * 1000) / 1000)
         : ''
   }
 }
 
-watch([isDownstairs, () => form.year, () => form.month], syncUpstairsReadings, {
-  immediate: true
-})
+/* ===== 上次读数自动带出：同租客 + 同房屋类型，本月之前最近一次的「本次读数」 ===== */
+
+function autoFillLastReadings(): void {
+  if (!form.tenant.trim()) return
+  for (const meta of METER_META) {
+    const state = meters[meta.key]
+    if (!state.enabled || state.lastReading.trim() !== '') continue
+    const prev = store.findPrevMeter(form.tenant, form.houseType, form.year, form.month, meta.key)
+    if (prev?.currentReading != null) {
+      state.lastReading = String(prev.currentReading)
+    }
+  }
+}
+
+watch(
+  [() => form.tenant, () => form.houseType, () => form.year, () => form.month],
+  () => {
+    syncUpstairsUsage()
+    autoFillLastReadings()
+  },
+  { immediate: true }
+)
+
+function onMeterToggle(key: MeterKey, value: boolean): void {
+  meters[key].enabled = value
+  if (value) autoFillLastReadings()
+}
 
 /* ===== 切换房屋类型：电价联动 ===== */
 
@@ -153,7 +178,7 @@ function meterUsageOf(key: MeterKey): number | null {
   if (last == null || current == null) return null
 
   if (isDownstairs.value) {
-    const ref = toNumber(state.upstairsReading)
+    const ref = toNumber(state.upstairsUsage)
     if (ref == null) return null
     return Math.round((current - last - ref) * 1000) / 1000
   }
@@ -181,7 +206,7 @@ function usageBreakdownOf(key: MeterKey): string {
   const last = toNumber(state.lastReading)
   const current = toNumber(state.currentReading)
   if (last == null || current == null) return ''
-  const ref = isDownstairs.value ? toNumber(state.upstairsReading) : null
+  const ref = isDownstairs.value ? toNumber(state.upstairsUsage) : null
   if (isDownstairs.value && ref == null) return ''
   return ref != null
     ? `${trimNum(current)} - ${trimNum(last)} - ${trimNum(ref)}`
@@ -196,7 +221,7 @@ function formulaOf(key: MeterKey): string | null {
   const price = meterPriceOf(key)
   if (last == null || current == null || price == null) return null
 
-  const ref = isDownstairs.value ? toNumber(state.upstairsReading) : null
+  const ref = isDownstairs.value ? toNumber(state.upstairsUsage) : null
   if (isDownstairs.value && ref == null) return null
 
   const refPart = ref != null ? ` - ${trimNum(ref)}` : ''
@@ -295,8 +320,8 @@ function buildDraft(): RecordDraft {
 
     const fee = meterFeeOf(meta.key)
     if (fee == null) {
-      if (isDownstairs.value && toNumber(state.upstairsReading) == null) {
-        throw new Error(`请先保存「楼上」${form.year}年${form.month}月的抄表记录，楼下才能自动带出楼上读数`)
+      if (isDownstairs.value && toNumber(state.upstairsUsage) == null) {
+        throw new Error(`请先保存「楼上」${form.year}年${form.month}月的抄表记录（需含本次/上次读数），楼下才能自动带出楼上用量`)
       }
       throw new Error(`请完整填写${meta.feeLabel}的读数和单价，或关闭「按读数计算」`)
     }
@@ -308,7 +333,7 @@ function buildDraft(): RecordDraft {
       ...(state.photo ? { photo: state.photo } : {})
     }
     if (isDownstairs.value) {
-      meterInfo.refReading = toNumber(state.upstairsReading) ?? 0
+      meterInfo.refUsage = toNumber(state.upstairsUsage) ?? 0
     }
 
     draft[meta.feeKey] = fee
@@ -441,19 +466,12 @@ async function onDelete(): Promise<void> {
               <van-switch
                 :model-value="meters[meta.key].enabled"
                 size="20px"
-                @update:model-value="(val: boolean) => (meters[meta.key].enabled = val)"
+                @update:model-value="(val: boolean) => onMeterToggle(meta.key, val)"
               />
             </template>
           </van-cell>
 
           <template v-if="meters[meta.key].enabled">
-            <van-field
-              v-model="meters[meta.key].lastReading"
-              type="number"
-              label="上次读数"
-              placeholder="手动输入上次读数"
-              input-align="right"
-            />
             <van-field
               v-model="meters[meta.key].currentReading"
               type="number"
@@ -461,15 +479,22 @@ async function onDelete(): Promise<void> {
               placeholder="手动输入本次读数"
               input-align="right"
             />
+            <van-field
+              v-model="meters[meta.key].lastReading"
+              type="number"
+              label="上次读数"
+              placeholder="自动带出上次读数"
+              input-align="right"
+            />
 
             <!-- 楼下：自动带出本月楼上读数（只读） -->
-            <div v-if="isDownstairs" class="ref-reading" :class="{ missing: meters[meta.key].upstairsReading === '' }">
-              <template v-if="meters[meta.key].upstairsReading !== ''">
-                ⬆️ 楼上本月读数：<b>{{ meters[meta.key].upstairsReading }}</b>
-                <span class="ref-tip">（自动带出，用量将扣除此读数）</span>
+            <div v-if="isDownstairs" class="ref-reading" :class="{ missing: meters[meta.key].upstairsUsage === '' }">
+              <template v-if="meters[meta.key].upstairsUsage !== ''">
+                ⬆️ 楼上本月用量：<b>{{ meters[meta.key].upstairsUsage }}</b>
+                <span class="ref-tip">（自动带出 = 楼上本次 - 楼上上次，楼下用量将扣除此用量）</span>
               </template>
               <template v-else>
-                ⚠️ 未找到楼上本月记录，请先保存「楼上」{{ form.year }}年{{ form.month }}月的抄表数据
+                ⚠️ 未找到楼上本月用量，请先保存「楼上」{{ form.year }}年{{ form.month }}月的抄表记录（需含本次/上次读数）
               </template>
             </div>
 

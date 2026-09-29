@@ -25,8 +25,8 @@ export interface MeterInfo {
   currentReading?: number
   /** 单价（元） */
   unitPrice?: number
-  /** 参考读数（楼下记录 = 楼上本月读数，用于总表扣减分表） */
-  refReading?: number
+  /** 参考用量（楼下记录 = 楼上本月的用量，用于总表扣分表） */
+  refUsage?: number
   /** 抄表照片（压缩后的 dataURL） */
   photo?: string
 }
@@ -56,7 +56,7 @@ export const METER_META: MeterMetaItem[] = [
 /** 用量 = 本次读数 - 上次读数 - 参考读数（楼上读数，仅楼下有） */
 export function calcMeterUsage(info: MeterInfo): number | null {
   if (info.lastReading == null || info.currentReading == null) return null
-  const usage = info.currentReading - info.lastReading - (info.refReading ?? 0)
+  const usage = info.currentReading - info.lastReading - (info.refUsage ?? 0)
   return Math.round(usage * 1000) / 1000
 }
 
@@ -78,7 +78,7 @@ export function meterInfoOf(record: RentRecord, feeKey: FeeKey): MeterInfo | und
 
 /** 公式文本，如 (862 - 820) × 3 或楼下 (1500 - 1400 - 80) × 3 */
 export function meterFormulaText(info: MeterInfo): string {
-  const ref = info.refReading != null ? ` - ${fmtNum(info.refReading)}` : ''
+  const ref = info.refUsage != null ? ` - ${fmtNum(info.refUsage)}` : ''
   return `(${fmtNum(info.currentReading)} - ${fmtNum(info.lastReading)}${ref}) × ${fmtNum(info.unitPrice)}`
 }
 
