@@ -26,3 +26,13 @@ export async function compressImage(
     URL.revokeObjectURL(url)
   }
 }
+
+/** Blob 转 dataURL：微信等浏览器长按识别图片需要 dataURL（blob: 部分内核不认） */
+export function blobToDataURL(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(new Error('读取图片失败'))
+    reader.readAsDataURL(blob)
+  })
+}

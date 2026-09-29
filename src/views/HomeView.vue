@@ -5,11 +5,19 @@ import { closeToast, showConfirmDialog, showLoadingToast, showToast } from 'vant
 
 import { useRentStore } from '@/stores/rent'
 import { useSyncStore } from '@/stores/sync'
-import { FEE_META, houseTypeMeta, recordTotal, type FeeMeta, type RentRecord } from '@/types'
+import {
+  FEE_META,
+  METER_META,
+  houseTypeMeta,
+  recordTotal,
+  type FeeMeta,
+  type RentRecord
+} from '@/types'
 import { buildBillText } from '@/utils/bill'
-import { renderBillImage } from '@/utils/billImage'
+import { renderBillImage, type BillPhotoGroup } from '@/utils/billImage'
 import { copyImage, copyText } from '@/utils/clipboard'
 import { formatYuan } from '@/utils/format'
+import { blobToDataURL } from '@/utils/image'
 
 const router = useRouter()
 const store = useRentStore()
@@ -95,18 +103,61 @@ const canShareImage = computed(() => {
 
 watch(showSharePopup, (visible) => {
   if (visible) return
-  if (shareImageUrl.value) URL.revokeObjectURL(shareImageUrl.value)
   shareImageUrl.value = ''
   shareBlob.value = null
 })
 
-/** 点击分享：生成截图 → 直接复制到剪贴板；失败则弹图长按转发 */
+/** 组装抄表照片：楼上=本次+上次；楼下=楼下本次/上次 + 楼上本次/上次 */
+function buildPhotoGroups(record: RentRecord): BillPhotoGroup[] {
+  const groups: BillPhotoGroup[] = []
+  const seen = new Set<string>()
+
+  function collect(
+    source: RentRecord | undefined,
+    tag: '本次' | '上次',
+    title: string
+  ): void {
+    if (!source) return
+    const photos = METER_META.map((meta) => ({
+      caption: `${meta.emoji} ${meta.label} · ${tag}`,
+      src: source.meters?.[meta.key]?.photo ?? ''
+    })).filter((item) => {
+      if (!item.src || seen.has(item.src)) return false
+      seen.add(item.src)
+      return true
+    })
+    if (photos.length > 0) {
+      groups.push({ title, photos })
+    }
+  }
+
+  const houseType = record.houseType ?? 'upstairs'
+  const prev = store.findPrevHouseRecord(houseType, record.year, record.month)
+  if (houseType === 'upstairs') {
+    collect(record, '本次', '⬆️ 楼上抄表照片')
+    collect(prev, '上次', '⬆️ 楼上抄表照片（上次）')
+  } else {
+    collect(record, '本次', '⬇️ 楼下抄表照片')
+    collect(prev, '上次', '⬇️ 楼下抄表照片（上次）')
+    const upstairs = store.findLatestHouseRecord('upstairs', record.year, record.month)
+    const upstairsPrev = upstairs
+      ? store.findPrevHouseRecord('upstairs', upstairs.year, upstairs.month)
+      : undefined
+    collect(upstairs, '本次', '⬆️ 楼上抄表照片')
+    collect(upstairsPrev, '上次', '⬆️ 楼上抄表照片（上次）')
+  }
+
+  return groups
+}
+
+/** 点击分享：生成含抄表照片的截图 → 弹窗预览 → 复制/长按/系统分享 */
 async function onShare(record: RentRecord): Promise<void> {
   showLoadingToast({ message: '正在生成截图…', forbidClick: true, duration: 0 })
   try {
-    const blob = await renderBillImage(record)
+    const blob = await renderBillImage(record, buildPhotoGroups(record))
     shareBlob.value = blob
-    shareImageUrl.value = URL.createObjectURL(blob)
+    // dataURL 显示（微信 blob: 地址不支持长按菜单）
+    shareImageUrl.value = await blobToDataURL(blob)
     shareText.value = buildBillText(record)
 
     // 弹窗中展示账单截图，用户通过 复制/长按/系统分享 发给租客
@@ -798,6 +849,11 @@ function avatarStyle(name: string): { background: string } {
 .share-img {
   display: block;
   width: 100%;
+  /* 允许微信/浏览器长按菜单（转发、保存） */
+  -webkit-touch-callout: default !important;
+  -webkit-user-select: auto !important;
+  user-select: auto !important;
+  pointer-events: auto;
 }
 
 .text-fallback {

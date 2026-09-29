@@ -128,6 +128,23 @@ export const useRentStore = defineStore('rent', () => {
     return list.length > 0 ? list[0] : undefined
   }
 
+  /** 查询同房屋类型在指定月份之前、最近一次的完整记录（用于带出「上次」抄表照片） */
+  function findPrevHouseRecord(
+    houseType: HouseType,
+    year: number,
+    month: number
+  ): RentRecord | undefined {
+    const list = [...records.value]
+      .filter(
+        (r) =>
+          !r.deleted &&
+          r.houseType === houseType &&
+          (r.year < year || (r.year === year && r.month < month))
+      )
+      .sort((a, b) => b.year - a.year || b.month - a.month || b.updatedAt - a.updatedAt)
+    return list.length > 0 ? list[0] : undefined
+  }
+
   function findById(id: string): RentRecord | undefined {
     return records.value.find((r) => r.id === id)
   }
@@ -242,6 +259,7 @@ export const useRentStore = defineStore('rent', () => {
     sortedRecords,
     recordsOfMonth,
     findPrevMeter,
+    findPrevHouseRecord,
     findLatestHouseRecord,
     findById,
     findDuplicate,

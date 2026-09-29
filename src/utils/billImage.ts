@@ -136,9 +136,89 @@ function dashedLine(
   ctx.restore()
 }
 
-/** 把账单绘制成 PNG 截图（纯前端，无网络依赖） */
-export async function renderBillImage(record: RentRecord): Promise<Blob> {
+/** 抄表照片项 */
+export interface BillPhotoItem {
+  /** 如：💧 水表 · 本次 */
+  caption: string
+  /** 图片 dataURL */
+  src: string
+}
+
+/** 抄表照片分组 */
+export interface BillPhotoGroup {
+  /** 如：⬆️ 楼上抄表照片 */
+  title: string
+  photos: BillPhotoItem[]
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error('图片加载失败'))
+    img.src = src
+  })
+}
+
+/** 按封面模式把图片绘制进圆角单元格 */
+function drawImageCover(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+): void {
+  const scale = Math.max(w / img.width, h / img.height)
+  const sw = w / scale
+  const sh = h / scale
+  const sx = (img.width - sw) / 2
+  const sy = (img.height - sh) / 2
+  ctx.save()
+  roundRect(ctx, x, y, w, h, 10)
+  ctx.clip()
+  ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h)
+  ctx.restore()
+  ctx.save()
+  roundRect(ctx, x, y, w, h, 10)
+  ctx.strokeStyle = '#e5e7eb'
+  ctx.lineWidth = 1
+  ctx.stroke()
+  ctx.restore()
+}
+
+const PHOTO_CELL_H = 185
+const PHOTO_GAP = 14
+
+/** 计算照片区高度（不含分割线） */
+function photosSectionHeight(groups: BillPhotoGroup[]): number {
+  if (groups.length === 0) return 0
+  let h = 44 // 「抄表照片」标题
+  for (const group of groups) {
+    const rows = Math.ceil(group.photos.length / 2)
+    h += 40 + rows * (24 + PHOTO_CELL_H + 16)
+  }
+  return h + 30 // 分割线区域
+}
+
+/** 把账单绘制成 PNG 截图（纯前端，无网络依赖），可附带抄表照片 */
+export async function renderBillImage(
+  record: RentRecord,
+  photoGroups: BillPhotoGroup[] = []
+): Promise<Blob> {
   const data = buildBillData(record)
+
+  // 预加载全部照片
+  const loadedImages = new Map<string, HTMLImageElement>()
+  await Promise.all(
+    photoGroups.flatMap((g) =>
+      g.photos.map(async (item) => {
+        if (!loadedImages.has(item.src)) {
+          loadedImages.set(item.src, await loadImage(item.src))
+        }
+      })
+    )
+  )
 
   const measureCanvas = document.createElement('canvas')
   const mctx = measureCanvas.getContext('2d')
@@ -160,9 +240,21 @@ export async function renderBillImage(record: RentRecord): Promise<Blob> {
   const TOTAL_H = 78
   const FOOTER_H = 66
   const NOTE_H = hasNote ? 24 + noteLines.length * 34 + 24 : 0
+  const CELL_W = Math.floor((CARD_W - P * 2 - PHOTO_GAP) / 2)
+  const PHOTOS_H = photosSectionHeight(photoGroups)
 
   const H =
-    16 + HEADER_H + 26 + feesH + 18 + TOTAL_H + 20 + NOTE_H + FOOTER_H + 16
+    16 +
+    HEADER_H +
+    26 +
+    feesH +
+    18 +
+    TOTAL_H +
+    20 +
+    NOTE_H +
+    PHOTOS_H +
+    FOOTER_H +
+    16
 
   const canvas = document.createElement('canvas')
   canvas.width = W * SCALE
@@ -268,6 +360,43 @@ export async function renderBillImage(record: RentRecord): Promise<Blob> {
       ny += 34
     }
     y += boxH + 20
+  }
+
+  // 抄表照片区
+  if (photoGroups.length > 0) {
+    dashedLine(ctx, CARD_X + P, y + 4, CARD_X + CARD_W - P, '#e5e7eb')
+    y += 34
+    ctx.fillStyle = '#323233'
+    ctx.font = F_LABEL
+    ctx.textAlign = 'left'
+    ctx.fillText('📷 抄表照片', CARD_X + P, y)
+    y += 44
+
+    for (const group of photoGroups) {
+      ctx.fillStyle = '#4f7cff'
+      ctx.font = F_DETAIL
+      ctx.textAlign = 'left'
+      ctx.fillText(group.title, CARD_X + P, y)
+      y += 30
+
+      for (let i = 0; i < group.photos.length; i += 2) {
+        const rowItems = group.photos.slice(i, i + 2)
+        for (let c = 0; c < rowItems.length; c++) {
+          const item = rowItems[c]!
+          const x = CARD_X + P + c * (CELL_W + PHOTO_GAP)
+          ctx.fillStyle = '#969799'
+          ctx.font = F_DETAIL
+          ctx.textAlign = 'left'
+          ctx.fillText(item.caption, x, y + 18)
+          const img = loadedImages.get(item.src)
+          if (img) {
+            drawImageCover(ctx, img, x, y + 26, CELL_W, PHOTO_CELL_H)
+          }
+        }
+        y += 24 + PHOTO_CELL_H + 16
+      }
+      y += 0
+    }
   }
 
   // 页脚
