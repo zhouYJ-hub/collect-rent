@@ -15,7 +15,7 @@ const editId = computed(() => (typeof route.params.id === 'string' ? route.param
 const isEdit = computed(() => editId.value.length > 0)
 const existing = computed(() => (editId.value ? store.findById(editId.value) : undefined))
 
-if (editId.value && !existing.value) {
+if (editId.value && (!existing.value || existing.value.deleted)) {
   showToast('记录不存在')
   router.replace('/')
 }

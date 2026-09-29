@@ -156,9 +156,15 @@ async function onSync(): Promise<void> {
         >
           立即同步（云端 ⇄ 本机合并）
         </van-button>
+        <div class="auto-rules">
+          <div class="rule-item">📥 打开网页时自动从云端拉取最新数据</div>
+          <div class="rule-item">📤 新增 / 修改 / 删除 / 标记收款后自动上传（需开启下方开关）</div>
+          <div class="rule-item">🔄 切回页面自动刷新云端（5 分钟节流）</div>
+          <div class="rule-item">🤝 多设备按「最后修改时间」自动合并，删除也会同步</div>
+        </div>
         <p class="action-tip">
-          同步会把云端与本机记录按「最后修改时间」合并，双方独有的记录都会保留；
-          在新手机 / 新浏览器上填好同一配置，点同步即可恢复全部数据。
+          云端与本机按「最后修改时间」自动合并，双方独有的记录都会保留；
+          在新手机 / 新浏览器上填好同一配置即可自动恢复全部数据。
         </p>
       </section>
     </main>
@@ -286,5 +292,20 @@ async function onSync(): Promise<void> {
   font-size: 12px;
   line-height: 1.7;
   color: var(--text-sub);
+}
+
+.auto-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f7f8fa;
+}
+
+.rule-item {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-main);
 }
 </style>

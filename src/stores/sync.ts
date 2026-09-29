@@ -7,6 +7,8 @@ import { base64ToUtf8, utf8ToBase64 } from '@/utils/base64'
 
 const SYNC_CONFIG_KEY = 'zyj-collect-rent:sync:v1'
 const AUTO_PUSH_DELAY_MS = 3000
+/** 回到页面时自动拉取的最小间隔 */
+const VISIBILITY_PULL_INTERVAL_MS = 5 * 60 * 1000
 
 /** GitHub 云同步配置（Token 仅保存在本机浏览器，不会打进构建产物） */
 export interface SyncConfig {
@@ -114,7 +116,11 @@ function parseRemotePayload(content: string): RentRecord[] {
   try {
     const parsed: unknown = JSON.parse(content)
     if (Array.isArray(parsed)) return parsed.filter(isRentRecord)
-    if (typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as { records?: unknown }).records)) {
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      Array.isArray((parsed as { records?: unknown }).records)
+    ) {
       return ((parsed as { records: unknown[] }).records).filter(isRentRecord)
     }
     return []
@@ -150,14 +156,17 @@ async function pushRemote(
     throw new Error('Token 无效或没有权限（需勾选该仓库的 Contents: Read and write）')
   }
   if (res.status === 409) {
-    throw new Error('云端刚被其他设备修改，请再点一次同步合并后重试')
+    throw new Error('云端刚被其他设备修改，请再同步一次合并后重试')
   }
   if (!res.ok) {
     throw new Error(`上传云端数据失败（HTTP ${res.status}）`)
   }
 }
 
-/** 双向合并：按 id 去重，updatedAt 新的一方胜出 */
+/**
+ * 双向合并：按 id 对齐，updatedAt 新的一方胜出。
+ * 删除通过墓碑记录（deleted=true）同步，最后操作的一方生效。
+ */
 function mergeRecords(local: RentRecord[], remote: RentRecord[]): RentRecord[] {
   const map = new Map<string, RentRecord>()
   for (const record of local) map.set(record.id, record)
@@ -170,6 +179,11 @@ function mergeRecords(local: RentRecord[], remote: RentRecord[]): RentRecord[] {
   return [...map.values()].sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
+/** 用于比较两份记录列表是否有差异（墓碑也参与比较） */
+function serializeRecords(list: RentRecord[]): string {
+  return JSON.stringify([...list].sort((a, b) => a.id.localeCompare(b.id)))
+}
+
 export const useSyncStore = defineStore('sync', () => {
   const rent = useRentStore()
 
@@ -180,7 +194,37 @@ export const useSyncStore = defineStore('sync', () => {
   const configured = computed(() => isConfigValid(config.value))
   const lastSyncAt = computed(() => config.value.lastSyncAt ?? null)
 
-  /** 拉取+合并+上传 完整同步 */
+  let suppressEcho = false
+  let pushTimer: ReturnType<typeof setTimeout> | null = null
+
+  /**
+   * 同步核心：拉取云端 → 与本地合并（含删除墓碑）→ 按需回写。
+   * forcePush=true 时无论是否有差异都上传（手动同步/自动上传共用）。
+   */
+  async function syncCore(forcePush: boolean): Promise<boolean> {
+    const remote = await fetchRemote(config.value)
+    const remoteRecords = remote ? parseRemotePayload(remote.content) : []
+    const merged = mergeRecords(rent.records, remoteRecords)
+
+    const localChanged = serializeRecords(merged) !== serializeRecords(rent.records)
+    const remoteChanged = serializeRecords(merged) !== serializeRecords(remoteRecords)
+
+    if (localChanged) {
+      suppressEcho = true
+      rent.replaceAll(merged)
+      await nextTick()
+    }
+
+    if (forcePush || remoteChanged) {
+      await pushRemote(config.value, merged, remote?.sha ?? null)
+    }
+
+    config.value = { ...config.value, lastSyncAt: Date.now() }
+    persistConfig(config.value)
+    return localChanged || remoteChanged
+  }
+
+  /** 手动「立即同步」：双向合并 + 强制上传 */
   async function sync(): Promise<void> {
     if (syncing.value) return
     if (!configured.value) throw new Error('请先完整填写并保存同步配置')
@@ -188,17 +232,7 @@ export const useSyncStore = defineStore('sync', () => {
     syncing.value = true
     lastError.value = null
     try {
-      const remote = await fetchRemote(config.value)
-      const remoteRecords = remote ? parseRemotePayload(remote.content) : []
-      const merged = mergeRecords(rent.records, remoteRecords)
-
-      suppressEcho = true
-      rent.replaceAll(merged)
-      await nextTick()
-
-      await pushRemote(config.value, merged, remote?.sha ?? null)
-      config.value = { ...config.value, lastSyncAt: Date.now() }
-      persistConfig(config.value)
+      await syncCore(true)
     } catch (error) {
       lastError.value = error instanceof Error ? error.message : '同步失败，请检查网络与配置'
       throw error
@@ -208,24 +242,26 @@ export const useSyncStore = defineStore('sync', () => {
     }
   }
 
-  /** 记录变化后的自动上传（同样先拉取合并，避免覆盖其他设备的改动） */
+  /** 后台静默拉取：启动时 / 回到页面时调用，失败不打扰用户 */
+  async function backgroundPull(): Promise<void> {
+    if (syncing.value || !configured.value) return
+    syncing.value = true
+    try {
+      await syncCore(false)
+    } catch (error) {
+      lastError.value = error instanceof Error ? error.message : '后台同步失败'
+    } finally {
+      suppressEcho = false
+      syncing.value = false
+    }
+  }
+
+  /** 记录变化（增/改/删/切换已收）后的自动上传：同样先合并，绝不覆盖其他设备 */
   async function autoPush(): Promise<void> {
     if (syncing.value || !configured.value) return
     syncing.value = true
     try {
-      const remote = await fetchRemote(config.value)
-      const remoteRecords = remote ? parseRemotePayload(remote.content) : []
-      const merged = mergeRecords(rent.records, remoteRecords)
-
-      if (merged.length !== rent.records.length) {
-        suppressEcho = true
-        rent.replaceAll(merged)
-        await nextTick()
-      }
-
-      await pushRemote(config.value, merged, remote?.sha ?? null)
-      config.value = { ...config.value, lastSyncAt: Date.now() }
-      persistConfig(config.value)
+      await syncCore(true)
     } catch (error) {
       lastError.value = error instanceof Error ? error.message : '自动同步失败'
     } finally {
@@ -233,9 +269,6 @@ export const useSyncStore = defineStore('sync', () => {
       syncing.value = false
     }
   }
-
-  let suppressEcho = false
-  let pushTimer: ReturnType<typeof setTimeout> | null = null
 
   function scheduleAutoPush(): void {
     if (pushTimer) clearTimeout(pushTimer)
@@ -245,7 +278,7 @@ export const useSyncStore = defineStore('sync', () => {
     }, AUTO_PUSH_DELAY_MS)
   }
 
-  // 监听本地记录变化（新增/编辑/删除/切换已收），防抖后自动上传
+  // 监听本地记录变化，防抖后自动上传（开启「修改后自动同步」时生效）
   watch(
     () => rent.records,
     () => {
@@ -255,6 +288,22 @@ export const useSyncStore = defineStore('sync', () => {
     },
     { deep: true }
   )
+
+  // 应用启动后自动从云端拉取最新数据（静默合并）
+  setTimeout(() => {
+    void backgroundPull()
+  }, 800)
+
+  // 从其他应用切回本页面时自动刷新云端数据（5 分钟内不重复拉取）
+  function handleVisibilityChange(): void {
+    if (document.visibilityState !== 'visible') return
+    if (!configured.value) return
+    const last = config.value.lastSyncAt ?? 0
+    if (Date.now() - last < VISIBILITY_PULL_INTERVAL_MS) return
+    void backgroundPull()
+  }
+
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 
   function updateConfig(patch: Partial<Omit<SyncConfig, 'lastSyncAt'>>): void {
     config.value = { ...config.value, ...patch }

@@ -21,6 +21,9 @@ export interface RentRecord {
   paid: boolean
   createdAt: number
   updatedAt: number
+  /** 软删除标记（墓碑）：同步删除操作需要保留记录占位，界面上一律过滤 */
+  deleted?: boolean
+  deletedAt?: number
 }
 
 export type FeeKey = 'rent' | 'water' | 'electricity' | 'gas' | 'garbage'

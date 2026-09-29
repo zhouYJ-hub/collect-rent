@@ -78,9 +78,9 @@ export const useRentStore = defineStore('rent', () => {
     { deep: true }
   )
 
-  /** 按年月倒序、同月按租客名排序 */
+  /** 按年月倒序、同月按租客名排序（只包含未删除记录，墓碑仅用于同步） */
   const sortedRecords = computed(() =>
-    [...records.value].sort(
+    [...records.value].filter((r) => !r.deleted).sort(
       (a, b) =>
         b.year - a.year ||
         b.month - a.month ||
@@ -103,6 +103,7 @@ export const useRentStore = defineStore('rent', () => {
     return records.value.find(
       (r) =>
         r.id !== excludeId &&
+        !r.deleted &&
         r.year === draft.year &&
         r.month === draft.month &&
         r.tenant.trim() === tenant
@@ -140,8 +141,17 @@ export const useRentStore = defineStore('rent', () => {
     records.value = list
   }
 
+  /**
+   * 删除记录（软删除）：
+   * 保留墓碑记录用于云端同步，其他设备同步后该条也会被标记删除；
+   * 所有界面读取都经过 sortedRecords / recordsOfMonth 过滤，用户无感知。
+   */
   function removeRecord(id: string): void {
-    records.value = records.value.filter((r) => r.id !== id)
+    const record = findById(id)
+    if (!record) return
+    record.deleted = true
+    record.deletedAt = Date.now()
+    record.updatedAt = Date.now()
   }
 
   function togglePaid(id: string): void {
@@ -176,7 +186,7 @@ export const useRentStore = defineStore('rent', () => {
       garbage: 0
     }
     for (const r of records.value) {
-      if (r.year !== year) continue
+      if (r.year !== year || r.deleted) continue
       for (const key of Object.keys(totals) as FeeKey[]) {
         totals[key] += r[key]
       }
@@ -186,7 +196,7 @@ export const useRentStore = defineStore('rent', () => {
 
   /** 有记录的年份（含当前年份），倒序 */
   function availableYears(): number[] {
-    const set = new Set(records.value.map((r) => r.year))
+    const set = new Set(records.value.filter((r) => !r.deleted).map((r) => r.year))
     set.add(new Date().getFullYear())
     return [...set].sort((a, b) => b - a)
   }

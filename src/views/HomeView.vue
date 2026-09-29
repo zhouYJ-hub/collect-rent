@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
 
 import { useRentStore } from '@/stores/rent'
+import { useSyncStore } from '@/stores/sync'
 import { FEE_META, recordTotal, type FeeMeta, type RentRecord } from '@/types'
 import { buildBillText } from '@/utils/bill'
 import { copyText } from '@/utils/clipboard'
@@ -11,6 +12,18 @@ import { formatYuan } from '@/utils/format'
 
 const router = useRouter()
 const store = useRentStore()
+const syncStore = useSyncStore()
+
+const syncStatusText = computed(() => {
+  if (!syncStore.configured) return '本地'
+  if (syncStore.syncing) return '同步中'
+  if (!syncStore.lastSyncAt) return '未同步'
+  const date = new Date(syncStore.lastSyncAt)
+  const now = new Date()
+  const hm = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+  const sameDay = date.toDateString() === now.toDateString()
+  return sameDay ? `已同步 ${hm}` : `已同步 ${date.getMonth() + 1}/${date.getDate()} ${hm}`
+})
 
 const now = new Date()
 const year = ref(now.getFullYear())
@@ -163,6 +176,10 @@ function avatarStyle(name: string): { background: string } {
       <div class="header-title">
         <span class="title-emoji">🏠</span>
         <span>收房租</span>
+        <span class="sync-badge" :class="{ off: !syncStore.configured }">
+          <van-icon :name="syncStore.syncing ? 'loading' : 'cloud-o'" :class="{ spin: syncStore.syncing }" />
+          {{ syncStatusText }}
+        </span>
       </div>
 
       <div class="month-switch">
@@ -335,6 +352,36 @@ function avatarStyle(name: string): { background: string } {
   font-size: 18px;
   font-weight: 700;
   letter-spacing: 1px;
+}
+
+.sync-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.sync-badge.off {
+  opacity: 0.8;
+}
+
+.sync-badge .spin {
+  animation: badge-spin 0.8s linear infinite;
+}
+
+@keyframes badge-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .title-emoji {
