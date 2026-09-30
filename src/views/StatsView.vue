@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 
 import { useRentStore } from '@/stores/rent'
-import { FEE_META, recordTotal, type FeeKey } from '@/types'
+import { FEE_META, recordTotal } from '@/types'
 import { formatYuan } from '@/utils/format'
 
 const store = useRentStore()
@@ -12,13 +12,64 @@ const year = ref(currentYear)
 
 const summary = computed(() => store.yearSummary(year.value))
 const feeTotals = computed(() => store.feeTotals(year.value))
+
+/** 停车开门弥补（正）与水气误差弥补（负，只扣一次） */
+const extraTotals = computed(() => {
+  let parking = 0
+  let allowance = 0
+  for (const r of store.records) {
+    if (r.year !== year.value || r.deleted) continue
+    parking += r.parkingFee ?? 0
+    allowance += r.waterGasAllowance ?? 0
+  }
+  return { parking, allowance }
+})
+
+interface CompositionRow {
+  key: string
+  label: string
+  amount: number
+  color: string
+  negative: boolean
+}
+
+/** 费用构成 = 五项费用 + 押金 + 停车弥补 − 水气误差（与合计口径一致） */
+const composition = computed<CompositionRow[]>(() => {
+  const rows: CompositionRow[] = FEE_META.map((fee) => ({
+    key: fee.key,
+    label: `${fee.emoji} ${fee.label}`,
+    amount: feeTotals.value[fee.key],
+    color: fee.color,
+    negative: false
+  }))
+  if (extraTotals.value.parking > 0) {
+    rows.push({
+      key: 'parking',
+      label: '🅿️ 停车弥补',
+      amount: extraTotals.value.parking,
+      color: '#f97316',
+      negative: false
+    })
+  }
+  if (extraTotals.value.allowance > 0) {
+    rows.push({
+      key: 'allowance',
+      label: '⚖️ 水气误差',
+      amount: -extraTotals.value.allowance,
+      color: '#d48806',
+      negative: true
+    })
+  }
+  return rows.filter((row) => Math.abs(row.amount) > 0)
+})
+
 const feeTotalSum = computed(() =>
-  FEE_META.reduce((sum, fee) => sum + feeTotals.value[fee.key], 0)
+  composition.value.reduce((sum, row) => sum + row.amount, 0)
 )
 
-function feePercent(key: FeeKey): string {
+function rowPercent(row: CompositionRow): string {
   if (feeTotalSum.value <= 0) return '0%'
-  return `${((feeTotals.value[key] / feeTotalSum.value) * 100).toFixed(1)}%`
+  return `${((Math.abs(row.amount) / feeTotalSum.value) * 100).toFixed(1)}%`
 }
 
 /** 12 个月，倒序展示（最近月份在前） */
@@ -95,15 +146,17 @@ function nextYear(): void {
       <section class="stats-card">
         <h2 class="card-heading">费用构成</h2>
         <div v-if="feeTotalSum > 0" class="fee-rows">
-          <div v-for="fee in FEE_META" :key="fee.key" class="fee-row">
-            <span class="fee-label">{{ fee.emoji }} {{ fee.label }}</span>
+          <div v-for="row in composition" :key="row.key" class="fee-row">
+            <span class="fee-label">{{ row.label }}</span>
             <div class="fee-bar-track">
               <div
                 class="fee-bar"
-                :style="{ width: feePercent(fee.key), background: fee.color }"
+                :style="{ width: rowPercent(row), background: row.color }"
               />
             </div>
-            <span class="fee-amount">{{ formatYuan(feeTotals[fee.key]) }}</span>
+            <span class="fee-amount" :class="{ negative: row.negative }">
+              {{ row.negative ? '-' : '' }}{{ formatYuan(Math.abs(row.amount)) }}
+            </span>
           </div>
         </div>
         <van-empty
@@ -281,6 +334,10 @@ function nextYear(): void {
   min-width: 2px;
   border-radius: 5px;
   transition: width 0.3s ease;
+}
+
+.fee-amount.negative {
+  color: #d48806;
 }
 
 .fee-amount {
