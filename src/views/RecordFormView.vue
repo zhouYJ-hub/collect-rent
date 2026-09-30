@@ -127,10 +127,11 @@ const isDownstairs = computed(() => form.houseType === 'downstairs')
 
 /** 水气误差弥补（元）：单独字段，楼下水费/气费计算时共用扣减，默认 100 */
 const waterGasAllowance = ref(
-  existing.value?.meters?.water?.allowance != null
-    ? String(existing.value.meters.water.allowance)
-    : existing.value?.meters?.gas?.allowance != null
-      ? String(existing.value.meters.gas.allowance)
+  existing.value?.waterGasAllowance != null
+    ? String(existing.value.waterGasAllowance)
+    : ((existing.value?.meters?.water as { allowance?: number } | undefined)?.allowance ??
+        '') !== ''
+      ? String((existing.value?.meters?.water as { allowance?: number } | undefined)?.allowance)
       : ''
 )
 
@@ -322,10 +323,9 @@ function meterPriceOf(key: MeterKey): number | null {
   return toNumber(meters[key].unitPrice)
 }
 
-/** 误差弥补：仅楼下 水/气 参与，共用「水气误差弥补」单独字段 */
-function meterAllowanceOf(key: MeterKey): number {
+/** 水气误差弥补（仅在合计中扣一次） */
+function allowanceValue(): number {
   if (!isDownstairs.value) return 0
-  if (key !== 'water' && key !== 'gas') return 0
   const value = toNumber(waterGasAllowance.value)
   return value != null && value > 0 ? value : 0
 }
@@ -334,8 +334,7 @@ function meterFeeOf(key: MeterKey): number | null {
   const usage = meterUsageOf(key)
   const price = meterPriceOf(key)
   if (usage == null || price == null || usage < 0) return null
-  const fee = usage * price - meterAllowanceOf(key)
-  return Math.round(Math.max(0, fee) * 100) / 100
+  return Math.round(usage * price * 100) / 100
 }
 
 function trimNum(value: number): string {
@@ -367,9 +366,7 @@ function formulaOf(key: MeterKey): string | null {
   if (isDownstairs.value && ref == null) return null
 
   const refPart = ref != null ? ` - ${trimNum(ref)}` : ''
-  const allowance = meterAllowanceOf(key)
-  const allowancePart = allowance > 0 ? ` - ${trimNum(allowance)}` : ''
-  return `(${trimNum(current)} - ${trimNum(last)}${refPart}) × ${trimNum(price)}${allowancePart}`
+  return `(${trimNum(current)} - ${trimNum(last)}${refPart}) × ${trimNum(price)}`
 }
 
 function parseAmount(text: string): number {
@@ -440,7 +437,9 @@ const total = computed(() => {
       ? (meterFeeOf(meta.key) ?? 0)
       : parseAmount(amountText[meta.feeKey])
   }
-  return sum
+  // 楼下：水气误差弥补只在合计中扣一次
+  sum -= allowanceValue()
+  return Math.round(Math.max(0, sum) * 100) / 100
 })
 
 function buildDraft(): RecordDraft {
@@ -482,15 +481,15 @@ function buildDraft(): RecordDraft {
     }
     if (isDownstairs.value) {
       meterInfo.refUsage = toNumber(state.upstairsUsage) ?? 0
-      if (meta.key === 'water' || meta.key === 'gas') {
-        const allowance = meterAllowanceOf(meta.key)
-        if (allowance > 0) meterInfo.allowance = allowance
-      }
     }
-    // 说明：水/气共用同一个 waterGasAllowance，此处仅为数据保存
 
     draft[meta.feeKey] = fee
     draft.meters![meta.key] = meterInfo
+  }
+
+  const allowance = allowanceValue()
+  if (isDownstairs.value && allowance > 0) {
+    draft.waterGasAllowance = allowance
   }
 
   if (isDownstairs.value && refRangeFrom.value && refRangeTo.value) {

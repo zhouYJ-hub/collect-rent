@@ -35,8 +35,6 @@ export interface MeterInfo {
   unitPrice?: number
   /** 参考用量（楼下记录 = 楼上本月的用量，用于总表扣分表） */
   refUsage?: number
-  /** 误差弥补（元）：楼下水/气费用计算后减去，默认 100 */
-  allowance?: number
   /** 抄表照片（压缩后的 dataURL） */
   photo?: string
 }
@@ -70,13 +68,12 @@ export function calcMeterUsage(info: MeterInfo): number | null {
   return Math.round(usage * 1000) / 1000
 }
 
-/** 按读数计算费用：用量 × 单价 − 误差弥补；信息不全或用量为负返回 null */
+/** 按读数计算费用：用量 × 单价；信息不全或用量为负返回 null */
 export function calcMeterFee(info: MeterInfo): number | null {
   if (info.unitPrice == null) return null
   const usage = calcMeterUsage(info)
   if (usage == null || usage < 0) return null
-  const fee = usage * info.unitPrice - (info.allowance ?? 0)
-  return Math.round(Math.max(0, fee) * 100) / 100
+  return Math.round(usage * info.unitPrice * 100) / 100
 }
 
 /** 取某项费用对应的抄表数据（房租/垃圾费返回 undefined） */
@@ -90,9 +87,7 @@ export function meterInfoOf(record: RentRecord, feeKey: FeeKey): MeterInfo | und
 /** 公式文本，如 (862 - 820) × 3 或楼下 (1500 - 1400 - 80) × 3 */
 export function meterFormulaText(info: MeterInfo): string {
   const ref = info.refUsage != null ? ` - ${fmtNum(info.refUsage)}` : ''
-  const allowance =
-    info.allowance != null && info.allowance !== 0 ? ` - ${fmtNum(info.allowance)}` : ''
-  return `(${fmtNum(info.currentReading)} - ${fmtNum(info.lastReading)}${ref}) × ${fmtNum(info.unitPrice)}${allowance}`
+  return `(${fmtNum(info.currentReading)} - ${fmtNum(info.lastReading)}${ref}) × ${fmtNum(info.unitPrice)}`
 }
 
 function fmtNum(value: number | undefined): string {
@@ -131,6 +126,8 @@ export interface RentRecord {
   meters?: Partial<Record<MeterKey, MeterInfo>>
   /** 楼下记录：计算楼上用量所选的期间（分享时带该期间照片） */
   refRange?: RefRange
+  /** 水气误差弥补（元）：仅在合计中扣减一次 */
+  waterGasAllowance?: number
 }
 
 export type FeeKey = 'rent' | 'water' | 'electricity' | 'gas' | 'garbage'
@@ -151,15 +148,12 @@ export const FEE_META: FeeMeta[] = [
   { key: 'garbage', label: '垃圾费', emoji: '🧹', color: '#10b981' }
 ]
 
-/** 单条记录的应收合计 */
+/** 单条记录的应收合计（楼下记录扣除一次水气误差弥补） */
 export function recordTotal(record: RentRecord): number {
-  return (
-    record.rent +
-    record.water +
-    record.electricity +
-    record.gas +
-    record.garbage
-  )
+  const sum =
+    record.rent + record.water + record.electricity + record.gas + record.garbage
+  const allowance = record.waterGasAllowance ?? 0
+  return Math.round(Math.max(0, sum - allowance) * 100) / 100
 }
 
 export function formatMonth(year: number, month: number): string {

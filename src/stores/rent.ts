@@ -22,6 +22,7 @@ export interface RecordDraft {
   paid: boolean
   meters?: Partial<Record<MeterKey, MeterInfo>>
   refRange?: RefRange
+  waterGasAllowance?: number
 }
 
 export interface PeriodSummary {

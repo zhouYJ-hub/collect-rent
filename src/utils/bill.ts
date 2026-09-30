@@ -42,6 +42,9 @@ export function buildBillText(record: RentRecord): string {
   }
 
   lines.push('')
+  if (record.waterGasAllowance && record.waterGasAllowance > 0) {
+    lines.push(`⚖️ 水气误差弥补：-${formatYuan(record.waterGasAllowance)}`)
+  }
   lines.push(`💰 合计：${formatYuan(recordTotal(record))}`)
   lines.push(record.paid ? '✅ 状态：已收款' : '⏳ 状态：待收款')
 

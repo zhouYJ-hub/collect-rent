@@ -21,6 +21,8 @@ export interface BillData {
   title: string
   tenantLine: string
   fees: BillFeeLine[]
+  /** 水气误差弥补（元，仅在合计中扣一次；0 = 不显示） */
+  allowance: number
   total: string
   paid: boolean
   note: string
@@ -68,6 +70,7 @@ export function buildBillData(record: RentRecord): BillData {
     title: `${record.year}年${record.month}月 房租账单`,
     tenantLine: `租客：${record.tenant}`,
     fees,
+    allowance: record.waterGasAllowance ?? 0,
     total: formatYuan(recordTotal(record)),
     paid: record.paid,
     note: record.note.trim()
@@ -265,9 +268,10 @@ export async function renderBillImage(
   const noteBoxH = hasNote ? 20 + noteLines.length * 34 + 16 : 0
   const noteH = hasNote ? noteBoxH + 20 : 0
 
-  const feesH = data.fees.length
-    ? data.fees.reduce((sum, fee) => sum + (fee.detail ? 96 : 62), 0)
-    : 52
+  const feesH =
+    (data.fees.length
+      ? data.fees.reduce((sum, fee) => sum + (fee.detail ? 96 : 62), 0)
+      : 52) + (data.allowance > 0 ? 52 : 0)
 
   const photosH = photosSectionHeight(photoGroups)
   const FOOTER_H = 66
@@ -345,6 +349,19 @@ export async function renderBillImage(
       }
       y += fee.detail ? 96 : 62
     }
+  }
+
+  // ===== 水气误差弥补（只在合计扣一次） =====
+  if (data.allowance > 0) {
+    ctx.fillStyle = '#969799'
+    ctx.font = F_LABEL
+    ctx.textAlign = 'left'
+    ctx.fillText('⚖️ 水气误差弥补', CARD_X + P, y + 34)
+    ctx.fillStyle = '#d48806'
+    ctx.font = F_AMOUNT
+    ctx.textAlign = 'right'
+    ctx.fillText(`-${formatYuan(data.allowance)}`, CARD_X + CARD_W - P, y + 34)
+    y += 52
   }
 
   // ===== 合计 =====
