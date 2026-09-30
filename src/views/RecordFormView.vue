@@ -65,7 +65,8 @@ const amountText = reactive<Record<FeeKey, string>>({
   water: initAmount(existing.value?.water),
   electricity: initAmount(existing.value?.electricity),
   gas: initAmount(existing.value?.gas),
-  garbage: initAmount(existing.value?.garbage)
+  garbage: initAmount(existing.value?.garbage),
+  deposit: initAmount(existing.value?.deposit ?? 0)
 })
 
 /* ===== 抄表模式（水/电/气） ===== */
@@ -431,7 +432,8 @@ function onMonthConfirm(selected: { selectedValues: Array<string | number> }): v
 /* ===== 合计与保存 ===== */
 
 const total = computed(() => {
-  let sum = parseAmount(amountText.rent) + parseAmount(amountText.garbage)
+  let sum =
+    parseAmount(amountText.rent) + parseAmount(amountText.garbage) + parseAmount(amountText.deposit)
   for (const meta of METER_META) {
     sum += meters[meta.key].enabled
       ? (meterFeeOf(meta.key) ?? 0)
@@ -453,6 +455,7 @@ function buildDraft(): RecordDraft {
     electricity: 0,
     gas: 0,
     garbage: parseAmount(amountText.garbage),
+    deposit: parseAmount(amountText.deposit),
     note: form.note,
     paid: form.paid,
     meters: {}
@@ -758,6 +761,14 @@ async function onDelete(): Promise<void> {
           type="number"
           label="🧹 垃圾费"
           placeholder="没有可留空"
+          input-align="right"
+        />
+
+        <van-field
+          v-model="amountText.deposit"
+          type="number"
+          label="💵 押金"
+          placeholder="手动输入，可留空"
           input-align="right"
         />
       </van-cell-group>

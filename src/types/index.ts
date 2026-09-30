@@ -113,6 +113,8 @@ export interface RentRecord {
   gas: number
   /** 垃圾清理费 */
   garbage: number
+  /** 押金（手动输入，计入合计与统计） */
+  deposit: number
   /** 备注 */
   note: string
   /** 是否已收款 */
@@ -130,7 +132,7 @@ export interface RentRecord {
   waterGasAllowance?: number
 }
 
-export type FeeKey = 'rent' | 'water' | 'electricity' | 'gas' | 'garbage'
+export type FeeKey = 'rent' | 'water' | 'electricity' | 'gas' | 'garbage' | 'deposit'
 
 export interface FeeMeta {
   key: FeeKey
@@ -145,13 +147,19 @@ export const FEE_META: FeeMeta[] = [
   { key: 'water', label: '水费', emoji: '💧', color: '#0ea5e9' },
   { key: 'electricity', label: '电费', emoji: '⚡', color: '#8b5cf6' },
   { key: 'gas', label: '燃气费', emoji: '🔥', color: '#ef4444' },
-  { key: 'garbage', label: '垃圾费', emoji: '🧹', color: '#10b981' }
+  { key: 'garbage', label: '垃圾费', emoji: '🧹', color: '#10b981' },
+  { key: 'deposit', label: '押金', emoji: '💵', color: '#f97316' }
 ]
 
 /** 单条记录的应收合计（楼下记录扣除一次水气误差弥补） */
 export function recordTotal(record: RentRecord): number {
   const sum =
-    record.rent + record.water + record.electricity + record.gas + record.garbage
+    record.rent +
+    record.water +
+    record.electricity +
+    record.gas +
+    record.garbage +
+    (record.deposit ?? 0)
   const allowance = record.waterGasAllowance ?? 0
   return Math.round(Math.max(0, sum - allowance) * 100) / 100
 }

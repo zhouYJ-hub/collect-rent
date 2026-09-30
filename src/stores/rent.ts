@@ -18,6 +18,7 @@ export interface RecordDraft {
   electricity: number
   gas: number
   garbage: number
+  deposit: number
   note: string
   paid: boolean
   meters?: Partial<Record<MeterKey, MeterInfo>>
@@ -61,7 +62,7 @@ function loadRecords(): RentRecord[] {
     if (!raw) return []
     const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return parsed.filter(isRentRecord)
+    return parsed.filter(isRentRecord).map((r) => ({ ...r, deposit: r.deposit ?? 0 }))
   } catch {
     return []
   }
@@ -238,7 +239,8 @@ export const useRentStore = defineStore('rent', () => {
       water: 0,
       electricity: 0,
       gas: 0,
-      garbage: 0
+      garbage: 0,
+      deposit: 0
     }
     for (const r of records.value) {
       if (r.year !== year || r.deleted) continue
