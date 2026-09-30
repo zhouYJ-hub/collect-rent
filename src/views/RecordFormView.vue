@@ -506,15 +506,9 @@ function buildDraft(): RecordDraft {
     draft.meters![meta.key] = meterInfo
   }
 
-  const allowance = allowanceValue()
-  if (isDownstairs.value && allowance > 0) {
-    draft.waterGasAllowance = allowance
-  }
-
-  const parking = parkingValue()
-  if (isDownstairs.value && parking > 0) {
-    draft.parkingFee = parking
-  }
+  // 弥补费每次提交都明确写入（0 = 不扣减），确保以本次提交为准、覆盖旧值
+  draft.waterGasAllowance = allowanceValue()
+  draft.parkingFee = parkingValue()
 
   if (isDownstairs.value && refRangeFrom.value && refRangeTo.value) {
     const [fromYear, fromMonth] = parseYM(refRangeFrom.value)
@@ -522,7 +516,11 @@ function buildDraft(): RecordDraft {
     if (fromYear * 12 + fromMonth <= toYear * 12 + toMonth) {
       const refRange: RefRange = { fromYear, fromMonth, toYear, toMonth }
       draft.refRange = refRange
+    } else {
+      draft.refRange = undefined
     }
+  } else {
+    draft.refRange = undefined
   }
 
   return draft
