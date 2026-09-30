@@ -102,7 +102,7 @@ const F_BADGE = `600 22px ${FONT_STACK}`
 const PHOTO_COLS = 3
 const PHOTO_COL_GAP = 14
 const PHOTO_CAPTION_H = 24
-const PHOTO_CELL_H = 120
+const PHOTO_CELL_H = 150
 const PHOTO_ROW_GAP = 16
 const PHOTO_ROW_H = PHOTO_CAPTION_H + PHOTO_CELL_H + PHOTO_ROW_GAP // 160
 const PHOTO_GROUP_TITLE_H = 44
@@ -174,7 +174,8 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   })
 }
 
-function drawImageCover(
+/** 完整显示图片（等比缩放居中，不裁剪），多余区域浅灰底 */
+function drawImageContain(
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement,
   x: number,
@@ -182,16 +183,20 @@ function drawImageCover(
   w: number,
   h: number
 ): void {
-  const scale = Math.max(w / img.width, h / img.height)
-  const sw = w / scale
-  const sh = h / scale
-  const sx = (img.width - sw) / 2
-  const sy = (img.height - sh) / 2
+  const scale = Math.min(w / img.width, h / img.height)
+  const dw = img.width * scale
+  const dh = img.height * scale
+  const dx = x + (w - dw) / 2
+  const dy = y + (h - dh) / 2
+
   ctx.save()
   roundRect(ctx, x, y, w, h, 10)
+  ctx.fillStyle = '#f5f6f8'
+  ctx.fill()
   ctx.clip()
-  ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h)
+  ctx.drawImage(img, dx, dy, dw, dh)
   ctx.restore()
+
   ctx.save()
   roundRect(ctx, x, y, w, h, 10)
   ctx.strokeStyle = '#e5e7eb'
@@ -439,7 +444,7 @@ export async function renderBillImage(
         ctx.fillText(item.caption, x, y + 18)
         const img = item.src ? loadedImages.get(item.src) : undefined
         if (img) {
-          drawImageCover(ctx, img, x, y + PHOTO_CAPTION_H, CELL_W, PHOTO_CELL_H)
+          drawImageContain(ctx, img, x, y + PHOTO_CAPTION_H, CELL_W, PHOTO_CELL_H)
         } else {
           drawPhotoPlaceholder(ctx, x, y + PHOTO_CAPTION_H, CELL_W, PHOTO_CELL_H)
         }
