@@ -414,11 +414,10 @@ export async function renderBillImage(
   }
 
   // ===== 页脚 =====
-  ctx.fillStyle = '#b7bdc8'
+  ctx.fillStyle = '#969799'
   ctx.font = F_FOOTER
   ctx.textAlign = 'center'
-  const date = new Date().toLocaleString('zh-CN', { hour12: false })
-  ctx.fillText(`由「收房租」生成 · ${date}`, W / 2, H - 26)
+  ctx.fillText('请核对，如有疑问随时联系～', W / 2, H - 26)
 
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
