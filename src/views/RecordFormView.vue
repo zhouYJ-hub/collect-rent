@@ -83,6 +83,8 @@ interface MeterFormState {
   photo: string
   /** 楼上本月读数（仅楼下使用，自动从本月楼上记录带出） */
   upstairsUsage: string
+  /** 误差弥补（元）：仅楼下 水/气 使用，费用计算后减去 */
+  allowance: string
 }
 
 function emptyMeter(key: MeterKey): MeterFormState {
@@ -92,7 +94,8 @@ function emptyMeter(key: MeterKey): MeterFormState {
     currentReading: '',
     unitPrice: String(defaultPrice(key, form.houseType)),
     photo: '',
-    upstairsUsage: ''
+    upstairsUsage: '',
+    allowance: ''
   }
 }
 
@@ -105,7 +108,8 @@ function initMeter(key: MeterKey): MeterFormState {
     currentReading: String(info.currentReading),
     unitPrice: info.unitPrice != null ? String(info.unitPrice) : String(defaultPrice(key, form.houseType)),
     photo: info.photo ?? '',
-    upstairsUsage: info.refUsage != null ? String(info.refUsage) : ''
+    upstairsUsage: info.refUsage != null ? String(info.refUsage) : '',
+    allowance: info.allowance != null ? String(info.allowance) : ''
   }
 }
 
@@ -285,7 +289,15 @@ watch(
   () => form.houseType,
   (type) => {
     meters.electricity.unitPrice = String(electricityPrice(type))
-  }
+    if (type === 'downstairs') {
+      for (const key of ['water', 'gas'] as const) {
+        if (meters[key].allowance.trim() === '') {
+          meters[key].allowance = '100'
+        }
+      }
+    }
+  },
+  { immediate: true }
 )
 
 /* ===== 用量与费用计算 ===== */
@@ -309,11 +321,20 @@ function meterPriceOf(key: MeterKey): number | null {
   return toNumber(meters[key].unitPrice)
 }
 
+/** 误差弥补：仅楼下 水/气 参与 */
+function meterAllowanceOf(key: MeterKey): number {
+  if (!isDownstairs.value) return 0
+  if (key !== 'water' && key !== 'gas') return 0
+  const value = toNumber(meters[key].allowance)
+  return value != null && value > 0 ? value : 0
+}
+
 function meterFeeOf(key: MeterKey): number | null {
   const usage = meterUsageOf(key)
   const price = meterPriceOf(key)
   if (usage == null || price == null || usage < 0) return null
-  return Math.round(usage * price * 100) / 100
+  const fee = usage * price - meterAllowanceOf(key)
+  return Math.round(Math.max(0, fee) * 100) / 100
 }
 
 function trimNum(value: number): string {
@@ -345,7 +366,9 @@ function formulaOf(key: MeterKey): string | null {
   if (isDownstairs.value && ref == null) return null
 
   const refPart = ref != null ? ` - ${trimNum(ref)}` : ''
-  return `(${trimNum(current)} - ${trimNum(last)}${refPart}) × ${trimNum(price)}`
+  const allowance = meterAllowanceOf(key)
+  const allowancePart = allowance > 0 ? ` - ${trimNum(allowance)}` : ''
+  return `(${trimNum(current)} - ${trimNum(last)}${refPart}) × ${trimNum(price)}${allowancePart}`
 }
 
 function parseAmount(text: string): number {
@@ -458,6 +481,10 @@ function buildDraft(): RecordDraft {
     }
     if (isDownstairs.value) {
       meterInfo.refUsage = toNumber(state.upstairsUsage) ?? 0
+      if (meta.key === 'water' || meta.key === 'gas') {
+        const allowance = meterAllowanceOf(meta.key)
+        if (allowance > 0) meterInfo.allowance = allowance
+      }
     }
 
     draft[meta.feeKey] = fee
@@ -685,6 +712,15 @@ async function onDelete(): Promise<void> {
               :label="`单价(元/${meta.unit})`"
               :placeholder="meta.priceHint"
               :readonly="meta.key !== 'electricity'"
+              input-align="right"
+            />
+
+            <van-field
+              v-if="isDownstairs && (meta.key === 'water' || meta.key === 'gas')"
+              v-model="meters[meta.key].allowance"
+              type="number"
+              label="误差弥补(元)"
+              placeholder="默认 100"
               input-align="right"
             />
 
