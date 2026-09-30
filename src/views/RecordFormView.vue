@@ -83,8 +83,6 @@ interface MeterFormState {
   photo: string
   /** 楼上本月读数（仅楼下使用，自动从本月楼上记录带出） */
   upstairsUsage: string
-  /** 误差弥补（元）：仅楼下 水/气 使用，费用计算后减去 */
-  allowance: string
 }
 
 function emptyMeter(key: MeterKey): MeterFormState {
@@ -94,8 +92,7 @@ function emptyMeter(key: MeterKey): MeterFormState {
     currentReading: '',
     unitPrice: String(defaultPrice(key, form.houseType)),
     photo: '',
-    upstairsUsage: '',
-    allowance: ''
+    upstairsUsage: ''
   }
 }
 
@@ -108,8 +105,7 @@ function initMeter(key: MeterKey): MeterFormState {
     currentReading: String(info.currentReading),
     unitPrice: info.unitPrice != null ? String(info.unitPrice) : String(defaultPrice(key, form.houseType)),
     photo: info.photo ?? '',
-    upstairsUsage: info.refUsage != null ? String(info.refUsage) : '',
-    allowance: info.allowance != null ? String(info.allowance) : ''
+    upstairsUsage: info.refUsage != null ? String(info.refUsage) : ''
   }
 }
 
@@ -128,6 +124,15 @@ function toNumber(text: string): number | null {
 /* ===== 楼下：楼上用量期间选择（差值计算） ===== */
 
 const isDownstairs = computed(() => form.houseType === 'downstairs')
+
+/** 水气误差弥补（元）：单独字段，楼下水费/气费计算时共用扣减，默认 100 */
+const waterGasAllowance = ref(
+  existing.value?.meters?.water?.allowance != null
+    ? String(existing.value.meters.water.allowance)
+    : existing.value?.meters?.gas?.allowance != null
+      ? String(existing.value.meters.gas.allowance)
+      : ''
+)
 
 const refRangeFrom = ref('')
 const refRangeTo = ref('')
@@ -289,12 +294,8 @@ watch(
   () => form.houseType,
   (type) => {
     meters.electricity.unitPrice = String(electricityPrice(type))
-    if (type === 'downstairs') {
-      for (const key of ['water', 'gas'] as const) {
-        if (meters[key].allowance.trim() === '') {
-          meters[key].allowance = '100'
-        }
-      }
+    if (type === 'downstairs' && waterGasAllowance.value.trim() === '') {
+      waterGasAllowance.value = '100'
     }
   },
   { immediate: true }
@@ -321,11 +322,11 @@ function meterPriceOf(key: MeterKey): number | null {
   return toNumber(meters[key].unitPrice)
 }
 
-/** 误差弥补：仅楼下 水/气 参与 */
+/** 误差弥补：仅楼下 水/气 参与，共用「水气误差弥补」单独字段 */
 function meterAllowanceOf(key: MeterKey): number {
   if (!isDownstairs.value) return 0
   if (key !== 'water' && key !== 'gas') return 0
-  const value = toNumber(meters[key].allowance)
+  const value = toNumber(waterGasAllowance.value)
   return value != null && value > 0 ? value : 0
 }
 
@@ -486,6 +487,7 @@ function buildDraft(): RecordDraft {
         if (allowance > 0) meterInfo.allowance = allowance
       }
     }
+    // 说明：水/气共用同一个 waterGasAllowance，此处仅为数据保存
 
     draft[meta.feeKey] = fee
     draft.meters![meta.key] = meterInfo
@@ -616,6 +618,16 @@ async function onDelete(): Promise<void> {
           input-align="right"
         />
 
+        <!-- 楼下：水气误差弥补（单独字段） -->
+        <van-field
+          v-if="isDownstairs"
+          v-model="waterGasAllowance"
+          type="number"
+          label="水气误差弥补(元)"
+          placeholder="默认 100"
+          input-align="right"
+        />
+
         <!-- 楼下：楼上用量期间选择（差值计算） -->
         <div v-if="isDownstairs" class="ref-range-box">
           <div class="rr-title">⬆️ 楼上用量期间（可选）</div>
@@ -715,14 +727,6 @@ async function onDelete(): Promise<void> {
               input-align="right"
             />
 
-            <van-field
-              v-if="isDownstairs && (meta.key === 'water' || meta.key === 'gas')"
-              v-model="meters[meta.key].allowance"
-              type="number"
-              label="误差弥补(元)"
-              placeholder="默认 100"
-              input-align="right"
-            />
 
             <div v-if="meterUsageOf(meta.key) !== null" class="meter-usage" :class="{ 'warn-bg': meterUsageOf(meta.key)! < 0 }">
               <template v-if="meterUsageOf(meta.key)! < 0">⚠️</template>
