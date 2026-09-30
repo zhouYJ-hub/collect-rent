@@ -87,6 +87,7 @@ const showSharePopup = ref(false)
 const shareText = ref('')
 const shareImageUrl = ref('')
 const shareBlob = ref<Blob | null>(null)
+const shareTypeText = ref('')
 
 type ShareCapableNavigator = Navigator & {
   share?: (data: { title?: string; text?: string; files?: File[] }) => Promise<void>
@@ -177,6 +178,8 @@ async function onShare(record: RentRecord): Promise<void> {
     // dataURL 显示（微信 blob: 地址不支持长按菜单）
     shareImageUrl.value = await blobToDataURL(blob)
     shareText.value = buildBillText(record)
+    const typeMeta = houseTypeMeta(record.houseType)
+    shareTypeText.value = typeMeta ? `${typeMeta.emoji} ${typeMeta.label}` : ''
 
     // 弹窗中展示账单截图，用户通过 复制/长按/系统分享 发给租客
     showSharePopup.value = true
@@ -428,7 +431,10 @@ function avatarStyle(name: string): { background: string } {
     >
       <div class="share-sheet">
         <div class="share-header">
-          <span class="share-title">账单截图</span>
+          <span class="share-title">
+              <span v-if="shareTypeText" class="share-type">{{ shareTypeText }}</span>
+              账单截图
+            </span>
           <button class="share-close" aria-label="关闭" @click="showSharePopup = false">
             <van-icon name="cross" />
           </button>
@@ -839,8 +845,22 @@ function avatarStyle(name: string): { background: string } {
 }
 
 .share-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 16px;
   font-weight: 700;
+}
+
+.share-type {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #eef3ff;
+  color: #4f7cff;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .share-close {
