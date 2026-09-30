@@ -45,6 +45,23 @@ const router = createRouter({
   ]
 })
 
+// 部署更新后，旧缓存页面引用的懒加载资源可能已 404；
+// 捕获后自动带参刷新一次，让浏览器获取最新 index.html 与资源
+router.onError((error) => {
+  const message = error instanceof Error ? error.message : String(error)
+  if (
+    /Failed to fetch dynamically imported module/i.test(message) ||
+    /error loading dynamically imported module/i.test(message) ||
+    /Importing a module script failed/i.test(message)
+  ) {
+    const url = new URL(window.location.href)
+    if (!url.searchParams.has('_r')) {
+      url.searchParams.set('_r', String(Date.now()))
+      window.location.replace(url.toString())
+    }
+  }
+})
+
 router.afterEach((to) => {
   document.title = to.meta.title ? `${to.meta.title} · 收房租` : '收房租'
 })
