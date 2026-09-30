@@ -126,6 +126,11 @@ function toNumber(text: string): number | null {
 
 const isDownstairs = computed(() => form.houseType === 'downstairs')
 
+/** 停车开门弥补费（元）：仅楼下，计入合计，默认 60 */
+const parkingFee = ref(
+  existing.value?.parkingFee != null ? String(existing.value.parkingFee) : ''
+)
+
 /** 水气误差弥补（元）：单独字段，楼下水费/气费计算时共用扣减，默认 100 */
 const waterGasAllowance = ref(
   existing.value?.waterGasAllowance != null
@@ -296,8 +301,9 @@ watch(
   () => form.houseType,
   (type) => {
     meters.electricity.unitPrice = String(electricityPrice(type))
-    if (type === 'downstairs' && waterGasAllowance.value.trim() === '') {
-      waterGasAllowance.value = '100'
+    if (type === 'downstairs') {
+      if (waterGasAllowance.value.trim() === '') waterGasAllowance.value = '100'
+      if (parkingFee.value.trim() === '') parkingFee.value = '60'
     }
   },
   { immediate: true }
@@ -328,6 +334,13 @@ function meterPriceOf(key: MeterKey): number | null {
 function allowanceValue(): number {
   if (!isDownstairs.value) return 0
   const value = toNumber(waterGasAllowance.value)
+  return value != null && value > 0 ? value : 0
+}
+
+/** 停车开门弥补费（楼下） */
+function parkingValue(): number {
+  if (!isDownstairs.value) return 0
+  const value = toNumber(parkingFee.value)
   return value != null && value > 0 ? value : 0
 }
 
@@ -433,7 +446,10 @@ function onMonthConfirm(selected: { selectedValues: Array<string | number> }): v
 
 const total = computed(() => {
   let sum =
-    parseAmount(amountText.rent) + parseAmount(amountText.garbage) + parseAmount(amountText.deposit)
+    parseAmount(amountText.rent) +
+    parseAmount(amountText.garbage) +
+    parseAmount(amountText.deposit) +
+    parkingValue()
   for (const meta of METER_META) {
     sum += meters[meta.key].enabled
       ? (meterFeeOf(meta.key) ?? 0)
@@ -493,6 +509,11 @@ function buildDraft(): RecordDraft {
   const allowance = allowanceValue()
   if (isDownstairs.value && allowance > 0) {
     draft.waterGasAllowance = allowance
+  }
+
+  const parking = parkingValue()
+  if (isDownstairs.value && parking > 0) {
+    draft.parkingFee = parking
   }
 
   if (isDownstairs.value && refRangeFrom.value && refRangeTo.value) {
@@ -627,6 +648,15 @@ async function onDelete(): Promise<void> {
           type="number"
           label="水气误差弥补(元)"
           placeholder="默认 100"
+          input-align="right"
+        />
+
+        <van-field
+          v-if="isDownstairs"
+          v-model="parkingFee"
+          type="number"
+          label="🅿️ 停车开门弥补(元)"
+          placeholder="默认 60"
           input-align="right"
         />
 

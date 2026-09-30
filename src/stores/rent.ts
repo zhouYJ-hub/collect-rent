@@ -24,6 +24,7 @@ export interface RecordDraft {
   meters?: Partial<Record<MeterKey, MeterInfo>>
   refRange?: RefRange
   waterGasAllowance?: number
+  parkingFee?: number
 }
 
 export interface PeriodSummary {

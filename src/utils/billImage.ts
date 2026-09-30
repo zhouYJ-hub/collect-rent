@@ -23,6 +23,8 @@ export interface BillData {
   fees: BillFeeLine[]
   /** 水气误差弥补（元，仅在合计中扣一次；0 = 不显示） */
   allowance: number
+  /** 停车开门弥补费（元；0 = 不显示） */
+  parkingFee: number
   total: string
   paid: boolean
   note: string
@@ -71,6 +73,7 @@ export function buildBillData(record: RentRecord): BillData {
     tenantLine: `租客：${record.tenant}`,
     fees,
     allowance: record.waterGasAllowance ?? 0,
+    parkingFee: record.parkingFee ?? 0,
     total: formatYuan(recordTotal(record)),
     paid: record.paid,
     note: record.note.trim()
@@ -271,7 +274,9 @@ export async function renderBillImage(
   const feesH =
     (data.fees.length
       ? data.fees.reduce((sum, fee) => sum + (fee.detail ? 96 : 62), 0)
-      : 52) + (data.allowance > 0 ? 52 : 0)
+      : 52) +
+      (data.allowance > 0 ? 52 : 0) +
+      (data.parkingFee > 0 ? 52 : 0)
 
   const photosH = photosSectionHeight(photoGroups)
   const FOOTER_H = 66
@@ -349,6 +354,19 @@ export async function renderBillImage(
       }
       y += fee.detail ? 96 : 62
     }
+  }
+
+  // ===== 停车开门弥补费 =====
+  if (data.parkingFee > 0) {
+    ctx.fillStyle = '#323233'
+    ctx.font = F_LABEL
+    ctx.textAlign = 'left'
+    ctx.fillText('🅿️ 停车开门弥补', CARD_X + P, y + 34)
+    ctx.fillStyle = '#0ba360'
+    ctx.font = F_AMOUNT
+    ctx.textAlign = 'right'
+    ctx.fillText(formatYuan(data.parkingFee), CARD_X + CARD_W - P, y + 34)
+    y += 52
   }
 
   // ===== 水气误差弥补（只在合计扣一次） =====

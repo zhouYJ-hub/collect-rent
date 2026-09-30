@@ -138,7 +138,8 @@ function buildPhotoGroups(record: RentRecord): BillPhotoGroup[] {
     // ③ 楼上起始月 ④ 楼上截止月（选了期间用所选月份，否则默认楼上本月 + 上次）
     const range = record.refRange
     if (range) {
-      fromRecord = store.findLatestHouseRecord('upstairs', range.fromYear, range.fromMonth)
+      // 起始月照片 = 起始月的「上次」记录照片（差值 = 到月本次 − 从月上次，照片对应）
+      fromRecord = store.findPrevHouseRecord('upstairs', range.fromYear, range.fromMonth)
       toRecord = store.findLatestHouseRecord('upstairs', range.toYear, range.toMonth)
       fromLabel = `${range.fromYear}年${range.fromMonth}月`
       toLabel = `${range.toYear}年${range.toMonth}月`
@@ -246,6 +247,21 @@ function feesOf(record: RentRecord): FeeWithAmount[] {
   return FEE_META.map((meta) => ({ ...meta, value: record[meta.key] })).filter(
     (fee) => fee.value > 0
   )
+}
+
+/** 额外标签：水气误差弥补 / 停车开门弥补（押金已含在费用标签中） */
+function extraChips(record: RentRecord): { text: string; color: string }[] {
+  const chips: { text: string; color: string }[] = []
+  if (record.waterGasAllowance && record.waterGasAllowance > 0) {
+    chips.push({
+      text: `⚖️ 误差弥补 -${formatYuan(record.waterGasAllowance)}`,
+      color: '#d48806'
+    })
+  }
+  if (record.parkingFee && record.parkingFee > 0) {
+    chips.push({ text: `🅿️ 停车 ${formatYuan(record.parkingFee)}`, color: '#f97316' })
+  }
+  return chips
 }
 
 function houseTag(record: RentRecord): string {
@@ -396,7 +412,18 @@ function avatarStyle(name: string): { background: string } {
             >
               {{ fee.emoji }} {{ fee.label }} {{ formatYuan(fee.value) }}
             </span>
-            <span v-if="feesOf(record).length === 0" class="fee-empty">
+            <span
+              v-for="(chip, index) in extraChips(record)"
+              :key="`extra-${index}`"
+              class="fee-chip"
+              :style="{ '--chip-color': chip.color }"
+            >
+              {{ chip.text }}
+            </span>
+            <span
+              v-if="feesOf(record).length === 0 && extraChips(record).length === 0"
+              class="fee-empty"
+            >
               尚未填写费用金额
             </span>
           </div>
