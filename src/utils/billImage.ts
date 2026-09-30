@@ -174,8 +174,8 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   })
 }
 
-/** 完整显示图片（等比缩放居中，不裁剪），多余区域浅灰底 */
-function drawImageContain(
+/** 照片宽高撑满整个格子（不裁剪，拉伸填满） */
+function drawImageFill(
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement,
   x: number,
@@ -183,18 +183,10 @@ function drawImageContain(
   w: number,
   h: number
 ): void {
-  const scale = Math.min(w / img.width, h / img.height)
-  const dw = img.width * scale
-  const dh = img.height * scale
-  const dx = x + (w - dw) / 2
-  const dy = y + (h - dh) / 2
-
   ctx.save()
   roundRect(ctx, x, y, w, h, 10)
-  ctx.fillStyle = '#f5f6f8'
-  ctx.fill()
   ctx.clip()
-  ctx.drawImage(img, dx, dy, dw, dh)
+  ctx.drawImage(img, x, y, w, h)
   ctx.restore()
 
   ctx.save()
@@ -444,7 +436,7 @@ export async function renderBillImage(
         ctx.fillText(item.caption, x, y + 18)
         const img = item.src ? loadedImages.get(item.src) : undefined
         if (img) {
-          drawImageContain(ctx, img, x, y + PHOTO_CAPTION_H, CELL_W, PHOTO_CELL_H)
+          drawImageFill(ctx, img, x, y + PHOTO_CAPTION_H, CELL_W, PHOTO_CELL_H)
         } else {
           drawPhotoPlaceholder(ctx, x, y + PHOTO_CAPTION_H, CELL_W, PHOTO_CELL_H)
         }
