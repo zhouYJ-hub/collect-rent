@@ -259,7 +259,7 @@ function extraChips(record: RentRecord): { text: string; color: string }[] {
     })
   }
   if (record.parkingFee && record.parkingFee > 0) {
-    chips.push({ text: `🅿️ 停车 ${formatYuan(record.parkingFee)}`, color: '#f97316' })
+    chips.push({ text: `🅿️ 停车 -${formatYuan(record.parkingFee)}`, color: '#f97316' })
   }
   return chips
 }

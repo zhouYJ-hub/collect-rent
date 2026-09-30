@@ -13,7 +13,7 @@ const year = ref(currentYear)
 const summary = computed(() => store.yearSummary(year.value))
 const feeTotals = computed(() => store.feeTotals(year.value))
 
-/** 停车开门弥补（正）与水气误差弥补（负，只扣一次） */
+/** 停车开门弥补与水气误差弥补（均为扣减项） */
 const extraTotals = computed(() => {
   let parking = 0
   let allowance = 0
@@ -33,7 +33,7 @@ interface CompositionRow {
   negative: boolean
 }
 
-/** 费用构成 = 五项费用 + 押金 + 停车弥补 − 水气误差（与合计口径一致） */
+/** 费用构成 = 五项费用 + 押金 − 停车弥补 − 水气误差（与合计口径一致） */
 const composition = computed<CompositionRow[]>(() => {
   const rows: CompositionRow[] = FEE_META.map((fee) => ({
     key: fee.key,
@@ -46,9 +46,9 @@ const composition = computed<CompositionRow[]>(() => {
     rows.push({
       key: 'parking',
       label: '🅿️ 停车弥补',
-      amount: extraTotals.value.parking,
+      amount: -extraTotals.value.parking,
       color: '#f97316',
-      negative: false
+      negative: true
     })
   }
   if (extraTotals.value.allowance > 0) {

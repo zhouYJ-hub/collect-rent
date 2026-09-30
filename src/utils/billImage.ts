@@ -362,10 +362,10 @@ export async function renderBillImage(
     ctx.font = F_LABEL
     ctx.textAlign = 'left'
     ctx.fillText('🅿️ 停车开门弥补', CARD_X + P, y + 34)
-    ctx.fillStyle = '#0ba360'
+    ctx.fillStyle = '#d48806'
     ctx.font = F_AMOUNT
     ctx.textAlign = 'right'
-    ctx.fillText(formatYuan(data.parkingFee), CARD_X + CARD_W - P, y + 34)
+    ctx.fillText(`-${formatYuan(data.parkingFee)}`, CARD_X + CARD_W - P, y + 34)
     y += 52
   }
 

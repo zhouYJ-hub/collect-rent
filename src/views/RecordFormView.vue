@@ -126,7 +126,7 @@ function toNumber(text: string): number | null {
 
 const isDownstairs = computed(() => form.houseType === 'downstairs')
 
-/** 停车开门弥补费（元）：仅楼下，计入合计，默认 60 */
+/** 停车开门弥补费（元）：仅楼下，合计中扣减，默认 60 */
 const parkingFee = ref(
   existing.value?.parkingFee != null ? String(existing.value.parkingFee) : ''
 )
@@ -448,7 +448,7 @@ const total = computed(() => {
   let sum =
     parseAmount(amountText.rent) +
     parseAmount(amountText.garbage) +
-    parseAmount(amountText.deposit) +
+    parseAmount(amountText.deposit) -
     parkingValue()
   for (const meta of METER_META) {
     sum += meters[meta.key].enabled

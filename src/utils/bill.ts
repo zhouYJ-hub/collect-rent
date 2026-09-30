@@ -43,7 +43,7 @@ export function buildBillText(record: RentRecord): string {
 
   lines.push('')
   if (record.parkingFee && record.parkingFee > 0) {
-    lines.push(`🅿️ 停车开门弥补：${formatYuan(record.parkingFee)}`)
+    lines.push(`🅿️ 停车开门弥补：-${formatYuan(record.parkingFee)}`)
   }
   if (record.waterGasAllowance && record.waterGasAllowance > 0) {
     lines.push(`⚖️ 水气误差弥补：-${formatYuan(record.waterGasAllowance)}`)

@@ -130,7 +130,7 @@ export interface RentRecord {
   refRange?: RefRange
   /** 水气误差弥补（元）：仅在合计中扣减一次 */
   waterGasAllowance?: number
-  /** 停车开门弥补费（元）：仅楼下，计入合计 */
+  /** 停车开门弥补费（元）：仅楼下，合计中扣减 */
   parkingFee?: number
 }
 
@@ -161,7 +161,7 @@ export function recordTotal(record: RentRecord): number {
     record.electricity +
     record.gas +
     record.garbage +
-    (record.deposit ?? 0) +
+    (record.deposit ?? 0) -
     (record.parkingFee ?? 0)
   const allowance = record.waterGasAllowance ?? 0
   return Math.round(Math.max(0, sum - allowance) * 100) / 100
